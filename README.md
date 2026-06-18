@@ -1,18 +1,254 @@
-# Salesforce DX Project: Next Steps
+# Configuration Management Agent
 
-Now that you’ve created a Salesforce DX project, what’s next? Here are some documentation resources to get you started.
+An **Agentforce employee agent** that lets sales reps configure Salesforce Revenue
+Cloud product bundles on quotes using plain language — inspect a configuration,
+change attributes and quantities, select/swap bundle components, and apply a change
+in **bulk across every instance of a bundle in a single request**. It is backed by
+the **Salesforce Product Configurator Business APIs** called through Invocable Apex.
 
-## How Do You Plan to Deploy Your Changes?
+It replaces slow, manual clicking through the configurator UI with a conversational,
+rules-respecting, deterministic automation layer.
 
-Do you want to deploy a set of changes, or create a self-contained application? Choose a [development model](https://developer.salesforce.com/tools/vscode/en/user-guide/development-models).
+---
 
-## Configure Your Salesforce DX Project
+## What it can do
 
-The `sfdx-project.json` file contains useful configuration information for your project. See [Salesforce DX Project Configuration](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_ws_config.htm) in the _Salesforce DX Developer Guide_ for details about this file.
+| Capability | Description |
+|---|---|
+| **Inspect** | "What's configured on this bundle?" — returns current attributes, values, quantities, and bundle structure. |
+| **Update attributes** | Change attribute values, including picklist attributes (resolves the correct picklist value automatically). |
+| **Change quantities** | Update line-item quantities, respecting which lines are quantity-locked by bundle rules. |
+| **Select / deselect / swap components** | Turn predefined bundle options on or off, or swap one option for another, within a component group's rules. |
+| **Bulk edit** | Apply the **same** component change to **every instance** of a bundle on a quote in one deterministic pass. |
+| **Guardrails** | Redirects off-topic requests; asks for clarification on ambiguous ones. |
 
-## Read All About It
+**By design, the agent can only toggle _predefined_ bundle options** — it cannot
+invent new products or delete arbitrary records, and it always enforces the
+configurator's bundle rules (min/max selections, required components).
 
-- [Salesforce Extensions Documentation](https://developer.salesforce.com/tools/vscode/)
-- [Salesforce CLI Setup Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_setup.meta/sfdx_setup/sfdx_setup_intro.htm)
-- [Salesforce DX Developer Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_intro.htm)
-- [Salesforce CLI Command Reference](https://developer.salesforce.com/docs/atlas.en-us.sfdx_cli_reference.meta/sfdx_cli_reference/cli_reference.htm)
+---
+
+## Architecture
+
+Three layers plus a finite-state-machine conversation model.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1 — Agentforce / Agent Script (conversation + routing) │
+│   start_agent (router)                                       │
+│     ├─ ConfigurationManagement   (inspect / update / select) │
+│     ├─ TemplateManagement         (saved configurations)     │
+│     ├─ off_topic                  (guardrail)                │
+│     └─ ambiguous_question         (guardrail)                │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ apex:// actions
+┌───────────────────────────▼─────────────────────────────────┐
+│ Layer 2 — Invocable Apex (the action layer, ~18 classes)     │
+│   ConfiguratorClient (shared util: session + node payloads)  │
+│   + configurator wrappers, discovery helpers, selection      │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ REST callout (Named Credential)
+┌───────────────────────────▼─────────────────────────────────┐
+│ Layer 3 — Salesforce Product Configurator Business APIs      │
+│   (the rules engine; enforces all bundle rules)              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key design principle — determinism lives in Apex, not the LLM.** Repetitive,
+must-be-correct logic (e.g. "apply this to all N bundle instances") is implemented
+in Apex, because LLMs are unreliable at exhaustive looping. The LLM interprets
+intent and confirms; Apex guarantees every instance is handled.
+
+### Apex classes
+
+**Shared util**
+- `ConfiguratorClient` — session lifecycle (`load-instance` / `save-instance`),
+  generic callout, blocking-rule-message detection, pricebook resolution, and
+  the add-nodes payload builder. The API contract lives here once so single and
+  bulk paths can't drift.
+
+**Configurator API wrappers** — `LoadConfiguratorSession`, `GetConfiguratorInstance`,
+`SaveConfiguratorInstance`, `SetConfiguratorInstance`, `ExecuteConfiguration`,
+`ExecuteConfigurationRules`, `AddConfiguratorNodes`, `UpdateConfiguratorNodes`,
+`DeleteConfiguratorNodes`, `SetProductQuantity`, `ManageSavedConfiguration`.
+
+**Discovery helpers (SOQL → IDs)** — `QueryProductByName` (product name → Product2 Id),
+`QueryQuoteLineItems` (find all line items / bundle instances for a product on a quote),
+`ListBundleComponentOptions` (a bundle's component groups + selectable options),
+`GetAttributePicklistValues` (valid picklist values for an attribute).
+
+**Constrained selection (what the agent actually uses to change components)**
+- `SelectBundleComponent` — select / deselect a predefined option on **one** bundle.
+- `BulkSelectBundleComponent` — apply one component change to **every instance** of a
+  bundle in a single session, **all-or-nothing**, with a per-instance result report.
+
+---
+
+## Repository layout
+
+```
+force-app/main/default/
+  aiAuthoringBundles/Configuration_Management_Agent/   # the agent (Agent Script)
+  classes/                                             # ~18 Apex classes + tests
+  permissionsets/Configurator_API_Access...            # the access bundle
+Product Configurator API Documentation/                # API reference
+Configuration_Management_Agent_Dossier.md              # architecture dossier
+```
+
+---
+
+## Prerequisites
+
+- A Salesforce org with **Revenue Cloud / Product Configurator** licensed, and the
+  **Headless Configurator** org feature **enabled** (see note in Setup → Auth below).
+- Salesforce CLI (`sf`).
+- The running user holding the relevant **Product Configuration / Revenue Cloud**
+  permission set licenses.
+
+---
+
+## Setup & Permissions (required for the agent to work)
+
+The agent calls the org's own REST API from Apex. That requires an **OAuth token**,
+which requires a registered client app. The chain below is what makes the callouts
+authenticate successfully **from the agent runtime**.
+
+> ⚠️ **Why not just use the session ID?** An earlier version authenticated with
+> `UserInfo.getSessionId()`. It works in synchronous/anonymous Apex but returns
+> **HTTP 401** when the Apex runs inside the Agentforce agent runtime (the runtime
+> session is not valid for REST callouts). The Named Credential below is the fix.
+
+### 1. Enable the Headless Configurator feature
+The Product Configurator Business APIs are gated by an **org-level feature**, separate
+from the user licenses. If a call returns
+`403 FUNCTIONALITY_NOT_ENABLED: [IHeadlessConfiguratorFamily]`, the feature is off —
+enable Headless Configuration in Setup (or via Salesforce support) even if the
+Product Configuration licenses are already assigned.
+
+### 2. Create a Connected App / External Client App (the OAuth client)
+Holds the consumer key/secret and scopes that let the org mint a token.
+- Enable OAuth; scopes: **`api`**, **`refresh_token offline_access`**.
+- Callback URL: temporary at first; replaced in step 3.
+- After saving, copy the **Consumer Key** and **Consumer Secret**.
+
+### 3. Create an Auth. Provider (`Configurator_Auth_Provider`)
+- Type: **Salesforce**; paste the Consumer Key/Secret from step 2.
+- Authorize/Token endpoints: the org's My Domain
+  (`https://<mydomain>.my.salesforce.com/services/oauth2/authorize` and `/token`).
+- Scopes: `api refresh_token offline_access`.
+- After saving, copy the generated **Callback URL** and paste it back into the
+  Connected App's callback URL (step 2). *(Mismatch here causes `redirect_uri_mismatch`.)*
+
+### 4. Create an External Credential (`Configurator_API_Cred`)
+- Authentication Protocol: **OAuth 2.0**, Flow Type: **Browser Flow**.
+- **Identity Provider**: the lookup to the Auth. Provider from step 3.
+  *(This field is a lookup to an Auth. Provider record — it is empty until step 3 exists.)*
+- Add a **Named Principal** named **`Configurator_Principal`**, scopes
+  `api refresh_token offline_access`.
+
+### 5. Create a Named Credential (`Configurator_API`)
+- URL: the org's My Domain (`https://<mydomain>.my.salesforce.com`).
+- External Credential: `Configurator_API_Cred`.
+- **Generate Authorization Header: ON** (this is what injects `Authorization: Bearer …`
+  so the Apex sets no auth header itself).
+- The Apex calls `callout:Configurator_API/services/data/v67.0/...`, so the
+  Named Credential **name must be exactly `Configurator_API`**.
+
+### 6. Authenticate the principal
+External Credential → Principals → `Configurator_Principal` → **Authenticate**.
+Approve the browser popup. Status must show authenticated/configured — otherwise
+callouts fail even with the permission set assigned.
+
+### 7. Deploy + assign the permission set (`Configurator_API_Access`)
+This single permission set grants **both** required accesses:
+- **External Credential Principal Access** to `Configurator_API_Cred-Configurator_Principal`
+  (lets the running user use the credential), **and**
+- **Apex class access** to all 18 classes.
+
+```bash
+sf project deploy start --metadata PermissionSet:Configurator_API_Access
+sf org assign permset --name Configurator_API_Access
+```
+
+> The Agentforce planner validates **every** action across **all** subagents at
+> startup — if the running user lacks access to even one class, the whole agent
+> fails. The permission set covers all of them, so assign it to every user
+> (and the agent's running user).
+
+### 8. Assign the agent's connection/bot user
+For an **employee agent**, the published agent needs a running user assigned in
+**Setup → Agentforce Agents → Configuration Management Agent**. Until this is set,
+the live in-UI experience can't execute actions (CLI `--use-live-actions` preview
+works without it).
+
+---
+
+## Deploy the agent
+
+```bash
+# Apex + permission set
+sf project deploy start --source-dir force-app/main/default/classes
+sf project deploy start --metadata PermissionSet:Configurator_API_Access
+
+# Agent bundle
+sf project deploy start --metadata AiAuthoringBundle:Configuration_Management_Agent
+sf agent validate authoring-bundle --api-name Configuration_Management_Agent
+sf agent publish  authoring-bundle --api-name Configuration_Management_Agent
+sf agent activate --api-name Configuration_Management_Agent
+```
+
+Preview against live Apex without publishing:
+
+```bash
+sf agent preview start --use-live-actions --authoring-bundle Configuration_Management_Agent
+```
+
+---
+
+## Usage examples (what a rep types)
+
+- "Show me the current configuration of quote `<quoteId>`."
+- "Change Base_Core_Count on the QuantumBit Complete Solution bundle to 8 on quote `<quoteId>`."
+- "Add the Essentials Training option to the QuantumBit Complete Solution bundle on quote `<quoteId>`."
+- **Bulk:** "Add the Essentials Training option to **all** of the QuantumBit Complete Solution bundles on quote `<quoteId>`."
+
+The agent resolves "this quote" from the record page when launched there; otherwise
+pass the Quote **Id** (it does not look up by quote number).
+
+---
+
+## Safety model
+
+- **Predefined options only** — cannot create new products or delete arbitrary records.
+- **Rule-enforcing** — a change the bundle forbids (e.g. removing a required component)
+  is reported as not possible and nothing is saved.
+- **Confirmation-gated** — commits require explicit user confirmation, enforced
+  deterministically.
+- **All-or-nothing bulk** — if any instance is rule-blocked, nothing is saved and the
+  rep gets a per-instance breakdown.
+- **Honest reporting** — actions surface success/failure; the agent does not claim
+  success on a failed call.
+
+> ⚠️ **`save-instance` is a whole-quote replace.** The configurator's save commits the
+> entire session and prunes anything not in scope. All operations are therefore scoped
+> to a single session. Always snapshot a quote's line items before bulk write tests.
+
+---
+
+## Known limitations
+
+- **Connection/bot user assignment (step 8)** is required before live in-UI use.
+- **Template save** (reusable named configurations) is not functional — blocked by a
+  Salesforce-side error on the saved-configuration endpoint; isolated in its own
+  subagent so it doesn't affect core flows.
+- **Bulk is capped at ~93 bundle instances** per request (governor-limit safety guard).
+- **Out of scope by design:** quote creation, pricing/discounting, product-catalog search.
+
+---
+
+## Roadmap
+
+- Bulk **attribute / quantity** edits (today bulk covers components).
+- **Cross-bundle / cross-quote** bulk operations.
+- **Pricing impact preview** and **change preview / undo** before commit.
+- **Smart component recommendations** based on current selection.
