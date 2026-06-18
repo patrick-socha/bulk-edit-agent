@@ -1,0 +1,28 @@
+{
+  "required" : [ "contextMappingId", "transactionJson" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "configuratorOptionsJson" : {
+      "title" : "Configurator Options Json",
+      "description" : "Optional JSON string of Configurator Options Input",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "contextMappingId" : {
+      "title" : "Context Mapping Id",
+      "description" : "The contextMappingId identifying the configuration context",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "transactionJson" : {
+      "title" : "Transaction Json",
+      "description" : "Stringified JSON of the full transaction to load (the template's data)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

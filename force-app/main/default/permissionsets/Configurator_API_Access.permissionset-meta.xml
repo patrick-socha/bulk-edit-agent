@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Configurator API Access</label>
+    <description>Grants access to the Configurator_API external credential principal and all Configuration Management Agent Apex classes.</description>
+    <hasActivationRequired>false</hasActivationRequired>
+
+    <!-- External Credential principal access: lets the running user use the
+         Configurator_API_Cred / Configurator_Principal identity for callouts.
+         Format: <ExternalCredentialDevName>-<PrincipalParameterName> -->
+    <externalCredentialPrincipalAccesses>
+        <enabled>true</enabled>
+        <externalCredentialPrincipal>Configurator_API_Cred-Configurator_Principal</externalCredentialPrincipal>
+    </externalCredentialPrincipalAccesses>
+
+    <!-- Apex class access for all 13 agent action classes. The planner validates
+         every action at startup, so the running user needs access to all of them. -->
+    <classAccesses>
+        <apexClass>LoadConfiguratorSession</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>GetConfiguratorInstance</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>SaveConfiguratorInstance</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>SetConfiguratorInstance</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ExecuteConfiguration</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>AddConfiguratorNodes</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>UpdateConfiguratorNodes</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>DeleteConfiguratorNodes</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>SetProductQuantity</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ExecuteConfigurationRules</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ManageSavedConfiguration</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>QueryProductByName</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>QueryQuoteLineItems</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>GetAttributePicklistValues</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ListBundleComponentOptions</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>SelectBundleComponent</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ConfiguratorClient</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>BulkSelectBundleComponent</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+</PermissionSet>

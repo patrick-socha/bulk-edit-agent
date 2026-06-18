@@ -1,0 +1,28 @@
+{
+  "required" : [ "contextId", "updatedNodesJson" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "configuratorOptionsJson" : {
+      "title" : "Configurator Options Json",
+      "description" : "Optional JSON string of Configurator Options Input",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "contextId" : {
+      "title" : "Context Id",
+      "description" : "Session handle from LoadConfiguratorSession",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "updatedNodesJson" : {
+      "title" : "Updated Nodes Json",
+      "description" : "JSON array of Configurator Updated Node Input objects (path + updatedAttributes map)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}
