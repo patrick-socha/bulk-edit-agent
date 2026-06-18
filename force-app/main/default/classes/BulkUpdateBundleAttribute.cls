@@ -50,20 +50,30 @@ public with sharing class BulkUpdateBundleAttribute {
             Set<Id> instanceIds = new Set<Id>();
             for (QuoteLineItem qli : bundleInstances) { instanceIds.add(qli.Id); }
 
-            // 2) Find the named attribute on each instance (one query).
-            //    attrByParent: bundleLineItemId -> the QuoteLineItemAttribute for attributeName
+            // 2) Find the named attribute on each instance (one query, in-memory match).
+            //    AttributeName format differs by Salesforce surface: the QuoteLineItemAttribute
+            //    SObject stores the SPACE form ("Operating System"), while the configurator's
+            //    attributesJson (what the agent reads) uses the UNDERSCORE form
+            //    ("Operating_System"). Match tolerantly so either form the agent passes works.
+            String wantedName = normalizeName(req.attributeName);
             Map<Id, QuoteLineItemAttribute> attrByParent = new Map<Id, QuoteLineItemAttribute>();
+            Set<String> availableNames = new Set<String>();
             for (QuoteLineItemAttribute a : [
                 SELECT Id, AttributeName, AttributeValue, AttributePicklistValueId, QuoteLineItemId
                 FROM QuoteLineItemAttribute
-                WHERE QuoteLineItemId IN :instanceIds AND AttributeName = :req.attributeName
+                WHERE QuoteLineItemId IN :instanceIds
                 WITH USER_MODE
             ]) {
-                attrByParent.put(a.QuoteLineItemId, a);
+                availableNames.add(a.AttributeName);
+                if (normalizeName(a.AttributeName) == wantedName) {
+                    attrByParent.put(a.QuoteLineItemId, a);
+                }
             }
             if (attrByParent.isEmpty()) {
+                List<String> names = new List<String>(availableNames);
+                names.sort();
                 return fail(r, 'None of the bundle instances have an attribute named "' +
-                    req.attributeName + '".');
+                    req.attributeName + '". Available attributes: ' + String.join(names, ', ') + '.');
             }
 
             // 3) Determine picklist vs free-text and resolve/validate the target value ONCE.
@@ -242,6 +252,13 @@ public with sharing class BulkUpdateBundleAttribute {
         r.saved = false;
         r.errorMessage = msg;
         return r;
+    }
+
+    /** Normalize an attribute name for tolerant matching: underscores and spaces are
+     *  treated as equivalent, comparison is case-insensitive, and surrounding space trimmed. */
+    private static String normalizeName(String name) {
+        if (name == null) { return ''; }
+        return name.replace('_', ' ').trim().toLowerCase();
     }
 
     public class Request {
