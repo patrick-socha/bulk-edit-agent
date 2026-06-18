@@ -86,4 +86,8 @@
         <apexClass>BulkSelectBundleComponent</apexClass>
         <enabled>true</enabled>
     </classAccesses>
+    <classAccesses>
+        <apexClass>BulkUpdateBundleAttribute</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
 </PermissionSet>

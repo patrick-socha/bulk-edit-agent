@@ -82,6 +82,12 @@ intent and confirms; Apex guarantees every instance is handled.
 - `BulkSelectBundleComponent` — apply one component change to **every instance** of a
   bundle in a single session, **all-or-nothing**, with a per-instance result report.
 
+**Bulk attribute updates**
+- `BulkUpdateBundleAttribute` — set the same attribute value (e.g. Operating System,
+  Base Core Count) on **every instance** of a bundle, **all-or-nothing**. Handles
+  picklist attributes (validates the requested value against allowed values up front
+  and rejects invalid input) and free-text/numeric attributes.
+
 ---
 
 ## Repository layout
@@ -210,7 +216,8 @@ sf agent preview start --use-live-actions --authoring-bundle Configuration_Manag
 - "Show me the current configuration of quote `<quoteId>`."
 - "Change Base_Core_Count on the QuantumBit Complete Solution bundle to 8 on quote `<quoteId>`."
 - "Add the Essentials Training option to the QuantumBit Complete Solution bundle on quote `<quoteId>`."
-- **Bulk:** "Add the Essentials Training option to **all** of the QuantumBit Complete Solution bundles on quote `<quoteId>`."
+- **Bulk component:** "Add the Essentials Training option to **all** of the QuantumBit Complete Solution bundles on quote `<quoteId>`."
+- **Bulk attribute:** "Swap the Operating System to Redhat Enterprise Linux on **all** instances of the QuantumBit Complete Solution bundle on quote `<quoteId>`."
 
 The agent resolves "this quote" from the record page when launched there; otherwise
 pass the Quote **Id** (it does not look up by quote number).
@@ -248,7 +255,7 @@ pass the Quote **Id** (it does not look up by quote number).
 
 ## Roadmap
 
-- Bulk **attribute / quantity** edits (today bulk covers components).
+- Bulk **quantity** edits (today bulk covers components and attributes).
 - **Cross-bundle / cross-quote** bulk operations.
 - **Pricing impact preview** and **change preview / undo** before commit.
 - **Smart component recommendations** based on current selection.

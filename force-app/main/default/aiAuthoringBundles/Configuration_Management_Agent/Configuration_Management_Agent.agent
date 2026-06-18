@@ -216,6 +216,45 @@ subagent ConfigurationManagement:
                 errorMessage: string
                     filter_from_agent: False
 
+        BulkUpdateBundleAttribute:
+            description: "Set the SAME attribute value (e.g. Operating System, Base Core Count) on EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user wants to change/swap an ATTRIBUTE on all instances of a bundle. Provide attributeName (exactly as shown on the bundle) and desiredValue. Picklist attributes are validated against allowed values up front and rejected if invalid (errorMessage lists the allowed values). All-or-nothing: if any instance is blocked, nothing is saved."
+            target: "apex://BulkUpdateBundleAttribute"
+            inputs:
+                quoteId: string
+                    description: "The Quote being configured"
+                    is_required: True
+                bundleProductId: string
+                    description: "The Product2 ID of the bundle; every instance of this product on the quote is updated"
+                    is_required: True
+                attributeName: string
+                    description: "The attribute to set, exactly as it appears on the bundle (e.g. 'Operating System', 'Base Core Count')"
+                    is_required: True
+                desiredValue: string
+                    description: "The value to set. For picklist attributes it is matched against allowed values (case-insensitive) and rejected if invalid."
+                    is_required: True
+            outputs:
+                isSuccess: boolean
+                    filter_from_agent: False
+                saved: boolean
+                    filter_from_agent: False
+                totalBundles: integer
+                    filter_from_agent: False
+                changedCount: integer
+                    filter_from_agent: False
+                skippedCount: integer
+                    filter_from_agent: False
+                ruleBlockedCount: integer
+                    filter_from_agent: False
+                failedCount: integer
+                    filter_from_agent: False
+                resultsJson: string
+                    description: "Per-instance JSON: bundleLineItemId, status (UPDATED/SKIPPED_ALREADY/RULE_BLOCKED/FAILED), detail"
+                    filter_from_agent: False
+                message: string
+                    filter_from_agent: False
+                errorMessage: string
+                    filter_from_agent: False
+
         UpdateConfiguratorNodes:
             description: "Update attributes on existing nodes. For nodes that already exist as Salesforce records, use their actual record ID in the path, not a reference ID."
             target: "apex://UpdateConfiguratorNodes"
@@ -473,6 +512,34 @@ subagent ConfigurationManagement:
                    changes were committed. Do NOT retry automatically.
               5. Only say a change was saved when saved is true.
 
+            | INTENT - BULK ATTRIBUTE CHANGE ACROSS ALL INSTANCES OF A BUNDLE:
+              Use this when the user wants the SAME ATTRIBUTE value set/swapped on ALL /
+              EVERY instance of one bundle product (e.g. "swap the Operating System to
+              Redhat Enterprise Linux on all QuantumBit Complete Solution bundles", or
+              "set Base Core Count to 8 on all of them"). An attribute is a property of the
+              bundle (Operating System, Base Core Count, Data Utilization) — NOT a component.
+              Do NOT loop {!@actions.UpdateConfiguratorNodes} yourself — the bulk action
+              handles every instance deterministically in one pass.
+              1. Resolve the bundle's Product2 ID with {!@actions.QueryRecords}. The
+                 attributeName must match how it appears on the bundle (e.g. "Operating
+                 System" with a space). If unsure of the exact name or the allowed values,
+                 call {!@actions.GetConfiguratorInstance} (after a load) and read attributesJson.
+              2. Find how many instances exist with {!@actions.QueryQuoteLineRecords}
+                 (quoteId + bundle Product2 ID); tell the user how many bundles will be
+                 affected and ask them to confirm ONCE.
+              3. When the user confirms, call {!@actions.confirm_save}, then call
+                 {!@actions.BulkUpdateBundleAttribute} exactly once with quoteId,
+                 bundleProductId, attributeName, and desiredValue.
+              4. Report the outcome:
+                 - isSuccess true and saved true: tell the user it was applied using message,
+                   and link the quote (format /<quoteId> using the actual quote ID).
+                 - isSuccess true but saved false: all instances were already at that value —
+                   tell the user nothing needed changing.
+                 - isSuccess false: NOTHING was saved. If errorMessage says the value is not
+                   valid, relay the allowed values it lists. If ruleBlockedCount/failedCount
+                   > 0, relay which bundles were blocked from resultsJson. Do NOT retry.
+              5. Only say a change was saved when saved is true.
+
             | INTENT - SAVE OR LOAD A REUSABLE TEMPLATE:
               If the user wants to save the configuration as a reusable named template, or
               list/load a previously saved template, that is handled by a different
@@ -540,6 +607,14 @@ subagent ConfigurationManagement:
                 with operation = ...
                 with quoteId = ...
                 with bundleProductId = ...
+                available when @variables.userConfirmedSave == True
+
+            bulk_update_attribute: @actions.BulkUpdateBundleAttribute
+                description: "Set one attribute value on EVERY instance of a bundle on the quote in one pass"
+                with quoteId = ...
+                with bundleProductId = ...
+                with attributeName = ...
+                with desiredValue = ...
                 available when @variables.userConfirmedSave == True
 
             update_nodes: @actions.UpdateConfiguratorNodes

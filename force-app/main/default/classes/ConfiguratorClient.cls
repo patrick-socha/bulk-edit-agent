@@ -150,4 +150,24 @@ public with sharing class ConfiguratorClient {
             'path' => new List<String>{ quoteId, lineItemId }
         };
     }
+
+    /**
+     * Build an update node that changes one attribute on one line item.
+     * Path is 3 segments: [quoteId, lineItemId, attributeNodeId] where attributeNodeId is
+     * the QuoteLineItemAttribute Id. For a picklist attribute pass attributeKey
+     * 'AttributePicklistValue' with the target picklist-value Id; for a free-text/numeric
+     * attribute pass 'AttributeValue' with the literal value.
+     */
+    public static Map<String, Object> buildUpdateAttributeNode(
+        String quoteId,
+        String lineItemId,
+        String attributeNodeId,
+        String attributeKey,
+        String attributeValue
+    ) {
+        return new Map<String, Object>{
+            'path' => new List<String>{ quoteId, lineItemId, attributeNodeId },
+            'updatedAttributes' => new Map<String, Object>{ attributeKey => attributeValue }
+        };
+    }
 }
