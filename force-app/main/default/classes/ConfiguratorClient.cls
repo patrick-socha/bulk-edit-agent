@@ -37,12 +37,15 @@ public with sharing class ConfiguratorClient {
         return callConfigurator('save-instance', new Map<String, Object>{ 'contextId' => ctx });
     }
 
-    /** Generic POST to a configurator action via the Named Credential. */
+    /** Generic POST to a configurator action via the Named Credential.
+     *  Uses the maximum 120s read timeout — the configurator API is slow per call and the
+     *  default ~10s timeout caused "Read timed out" on multi-instance bulk operations. */
     public static HttpResponse callConfigurator(String action, Map<String, Object> body) {
         HttpRequest req = new HttpRequest();
         req.setEndpoint('callout:Configurator_API' + BASE + action);
         req.setHeader('Content-Type', 'application/json');
         req.setMethod('POST');
+        req.setTimeout(120000);
         req.setBody(JSON.serialize(body));
         return new Http().send(req);
     }

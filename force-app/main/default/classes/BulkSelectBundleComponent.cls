@@ -110,8 +110,13 @@ public with sharing class BulkSelectBundleComponent {
 
             // 5) Stage each instance; track per-bundle status. Sequential mutation calls in
             //    the SAME session (works regardless of multi-parent-per-call support).
+            // Build all mutation nodes (skipping idempotent instances), then send ONE
+            //    add-nodes (or one delete-nodes) call. Batching avoids N sequential slow
+            //    callouts that caused "Read timed out" — 3 round-trips total.
             Boolean anyBlockedOrFailed = false;
             Integer idx = 0;
+            List<Object> mutationNodes = new List<Object>();
+            List<Map<String, Object>> stagedEntries = new List<Map<String, Object>>();
             for (Id bundleLineItemId : instanceIds) {
                 idx++;
                 Map<String, Object> entry = new Map<String, Object>{ 'bundleLineItemId' => bundleLineItemId };
@@ -133,42 +138,55 @@ public with sharing class BulkSelectBundleComponent {
                     continue;
                 }
 
-                // Build + send the mutation for this instance.
-                HttpResponse resp;
                 if (op == 'SELECT') {
-                    List<Object> nodes = ConfiguratorClient.buildSelectNodes(
+                    // Two nodes (QLI + relationship) per instance; unique ref per instance.
+                    mutationNodes.addAll(ConfiguratorClient.buildSelectNodes(
                         req.quoteId, bundleLineItemId, prc, pbe,
-                        idx + '_' + String.valueOf(Math.abs(req.productRelatedComponentId.hashCode())));
-                    resp = ConfiguratorClient.callConfigurator('add-nodes',
-                        new Map<String, Object>{ 'contextId' => ctx, 'addedNodes' => nodes });
+                        idx + '_' + String.valueOf(Math.abs(req.productRelatedComponentId.hashCode()))));
                 } else {
                     Id childItemId = childItemByParent.get(bundleLineItemId).get(targetChildProductId);
-                    resp = ConfiguratorClient.callConfigurator('delete-nodes',
-                        new Map<String, Object>{ 'contextId' => ctx,
-                            'deletedNodes' => new List<Object>{
-                                ConfiguratorClient.buildDeleteNode(req.quoteId, childItemId) } });
+                    mutationNodes.add(ConfiguratorClient.buildDeleteNode(req.quoteId, childItemId));
                 }
+                stagedEntries.add(entry); // status set after the batch call
+            }
 
+            // Send the single batched mutation (only if there's something to change).
+            if (!mutationNodes.isEmpty()) {
+                String action = (op == 'SELECT') ? 'add-nodes' : 'delete-nodes';
+                String nodeKey = (op == 'SELECT') ? 'addedNodes' : 'deletedNodes';
+                HttpResponse resp = ConfiguratorClient.callConfigurator(action,
+                    new Map<String, Object>{ 'contextId' => ctx, nodeKey => mutationNodes });
                 Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(resp.getBody());
                 Boolean apiOk = parsed.get('success') == true;
                 String ruleMessage = ConfiguratorClient.extractBlockingMessage(parsed);
 
-                if (!apiOk) {
-                    entry.put('status', 'FAILED');
-                    Object errs = parsed.get('errors');
-                    entry.put('detail', errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.');
-                    r.failedCount++;
+                if (!apiOk || ruleMessage != null) {
                     anyBlockedOrFailed = true;
-                } else if (ruleMessage != null) {
-                    entry.put('status', 'RULE_BLOCKED');
-                    entry.put('detail', ruleMessage);
-                    r.ruleBlockedCount++;
-                    anyBlockedOrFailed = true;
+                    String status;
+                    String detail;
+                    if (ruleMessage != null) {
+                        status = 'RULE_BLOCKED';
+                        detail = ruleMessage;
+                        r.ruleBlockedCount += stagedEntries.size();
+                    } else {
+                        status = 'FAILED';
+                        Object errs = parsed.get('errors');
+                        detail = errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.';
+                        r.failedCount += stagedEntries.size();
+                    }
+                    for (Map<String, Object> e : stagedEntries) {
+                        e.put('status', status);
+                        e.put('detail', detail);
+                        perBundle.add(e);
+                    }
                 } else {
-                    entry.put('status', op == 'SELECT' ? 'SELECTED' : 'DESELECTED');
-                    r.changedCount++;
+                    String okStatus = (op == 'SELECT') ? 'SELECTED' : 'DESELECTED';
+                    for (Map<String, Object> e : stagedEntries) {
+                        e.put('status', okStatus);
+                        perBundle.add(e);
+                        r.changedCount++;
+                    }
                 }
-                perBundle.add(entry);
             }
 
             r.resultsJson = JSON.serialize(perBundle);

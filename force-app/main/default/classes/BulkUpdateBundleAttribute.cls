@@ -117,8 +117,12 @@ public with sharing class BulkUpdateBundleAttribute {
                 return fail(r, 'Could not start a configurator session for the quote.');
             }
 
-            // 5) Stage each instance.
+            // 5) Build all update nodes (skipping idempotent instances), then send ONE
+            //    update-nodes call. Batching avoids N sequential slow callouts that caused
+            //    "Read timed out" — 3 round-trips total (load, one bulk update, save).
             Boolean anyBlockedOrFailed = false;
+            List<Object> updateNodes = new List<Object>();
+            List<Map<String, Object>> stagedEntries = new List<Map<String, Object>>();
             for (Id bundleLineItemId : instanceIds) {
                 Map<String, Object> entry = new Map<String, Object>{ 'bundleLineItemId' => bundleLineItemId };
                 QuoteLineItemAttribute attr = attrByParent.get(bundleLineItemId);
@@ -132,7 +136,6 @@ public with sharing class BulkUpdateBundleAttribute {
                     continue;
                 }
 
-                // Idempotency: already at the desired value?
                 Boolean already = isPicklist
                     ? (attr.AttributePicklistValueId == (Id) targetValue)
                     : (attr.AttributeValue != null && attr.AttributeValue.equalsIgnoreCase(targetValue));
@@ -144,31 +147,47 @@ public with sharing class BulkUpdateBundleAttribute {
                     continue;
                 }
 
-                Map<String, Object> updNode = ConfiguratorClient.buildUpdateAttributeNode(
-                    req.quoteId, bundleLineItemId, attr.Id, attributeKey, targetValue);
-                HttpResponse resp = ConfiguratorClient.callConfigurator('update-nodes',
-                    new Map<String, Object>{ 'contextId' => ctx, 'updatedNodes' => new List<Object>{ updNode } });
+                updateNodes.add(ConfiguratorClient.buildUpdateAttributeNode(
+                    req.quoteId, bundleLineItemId, attr.Id, attributeKey, targetValue));
+                stagedEntries.add(entry); // pending — status set after the batch call
+            }
 
+            // Send the single batched mutation (only if there's something to change).
+            if (!updateNodes.isEmpty()) {
+                HttpResponse resp = ConfiguratorClient.callConfigurator('update-nodes',
+                    new Map<String, Object>{ 'contextId' => ctx, 'updatedNodes' => updateNodes });
                 Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(resp.getBody());
                 Boolean apiOk = parsed.get('success') == true;
                 String ruleMessage = ConfiguratorClient.extractBlockingMessage(parsed);
 
-                if (!apiOk) {
-                    entry.put('status', 'FAILED');
-                    Object errs = parsed.get('errors');
-                    entry.put('detail', errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.');
-                    r.failedCount++;
+                if (!apiOk || ruleMessage != null) {
+                    // The batch is atomic from our perspective: if it didn't cleanly succeed,
+                    // none of the staged instances are considered changed (all-or-nothing).
                     anyBlockedOrFailed = true;
-                } else if (ruleMessage != null) {
-                    entry.put('status', 'RULE_BLOCKED');
-                    entry.put('detail', ruleMessage);
-                    r.ruleBlockedCount++;
-                    anyBlockedOrFailed = true;
+                    String detail;
+                    String status;
+                    if (ruleMessage != null) {
+                        status = 'RULE_BLOCKED';
+                        detail = ruleMessage;
+                        r.ruleBlockedCount += stagedEntries.size();
+                    } else {
+                        status = 'FAILED';
+                        Object errs = parsed.get('errors');
+                        detail = errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.';
+                        r.failedCount += stagedEntries.size();
+                    }
+                    for (Map<String, Object> e : stagedEntries) {
+                        e.put('status', status);
+                        e.put('detail', detail);
+                        perBundle.add(e);
+                    }
                 } else {
-                    entry.put('status', 'UPDATED');
-                    r.changedCount++;
+                    for (Map<String, Object> e : stagedEntries) {
+                        e.put('status', 'UPDATED');
+                        perBundle.add(e);
+                        r.changedCount++;
+                    }
                 }
-                perBundle.add(entry);
             }
 
             r.resultsJson = JSON.serialize(perBundle);
