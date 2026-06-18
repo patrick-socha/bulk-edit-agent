@@ -1,0 +1,49 @@
+{
+  "required" : [ "operation" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "dataJson" : {
+      "title" : "Data Json",
+      "description" : "Stringified JSON configuration data (SAVE and UPDATE)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "operation" : {
+      "title" : "Operation",
+      "description" : "LIST, SAVE, UPDATE, or DELETE",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "referenceRecordId" : {
+      "title" : "Reference Record Id",
+      "description" : "Required for LIST and SAVE: the Quote ID the template is linked to",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "savedConfigDescription" : {
+      "title" : "Saved Config Description",
+      "description" : "Description of the template (SAVE and UPDATE)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "savedConfigId" : {
+      "title" : "Saved Config Id",
+      "description" : "Required for UPDATE and DELETE: the saved configuration record ID",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "savedConfigName" : {
+      "title" : "Saved Config Name",
+      "description" : "Name for the template (SAVE and UPDATE)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

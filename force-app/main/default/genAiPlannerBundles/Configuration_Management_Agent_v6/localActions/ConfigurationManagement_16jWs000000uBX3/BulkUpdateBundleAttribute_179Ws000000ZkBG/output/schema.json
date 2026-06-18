@@ -1,0 +1,86 @@
+{
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "changedCount" : {
+      "title" : "Changed Count",
+      "description" : "Changed Count",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "errorMessage" : {
+      "title" : "Error Message",
+      "description" : "Error Message",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "failedCount" : {
+      "title" : "Failed Count",
+      "description" : "Failed Count",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "isSuccess" : {
+      "title" : "Is Success",
+      "description" : "Is Success",
+      "lightning:type" : "lightning__booleanType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "message" : {
+      "title" : "Message",
+      "description" : "Message",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "resultsJson" : {
+      "title" : "Results Json",
+      "description" : "Per-instance JSON: bundleLineItemId, status (UPDATED/SKIPPED_ALREADY/RULE_BLOCKED/FAILED), detail",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "ruleBlockedCount" : {
+      "title" : "Rule Blocked Count",
+      "description" : "Rule Blocked Count",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "saved" : {
+      "title" : "Saved",
+      "description" : "Saved",
+      "lightning:type" : "lightning__booleanType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "skippedCount" : {
+      "title" : "Skipped Count",
+      "description" : "Skipped Count",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    },
+    "totalBundles" : {
+      "title" : "Total Bundles",
+      "description" : "Total Bundles",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isDisplayable" : false,
+      "copilotAction:isUsedByPlanner" : true
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

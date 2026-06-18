@@ -1,0 +1,35 @@
+{
+  "required" : [ "quoteId", "bundleProductId", "attributeName", "desiredValue" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "attributeName" : {
+      "title" : "Attribute Name",
+      "description" : "The attribute to set, exactly as it appears on the bundle (e.g. 'Operating System', 'Base Core Count')",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "bundleProductId" : {
+      "title" : "Bundle Product Id",
+      "description" : "The Product2 ID of the bundle; every instance of this product on the quote is updated",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "desiredValue" : {
+      "title" : "Desired Value",
+      "description" : "The value to set. For picklist attributes it is matched against allowed values (case-insensitive) and rejected if invalid.",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote being configured",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

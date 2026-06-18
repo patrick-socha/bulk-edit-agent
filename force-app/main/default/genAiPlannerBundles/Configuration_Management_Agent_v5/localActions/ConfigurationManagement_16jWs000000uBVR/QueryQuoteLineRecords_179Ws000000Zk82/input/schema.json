@@ -1,0 +1,21 @@
+{
+  "required" : [ "quoteId", "productId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "productId" : {
+      "title" : "Product Id",
+      "description" : "The Product2 ID",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote ID",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

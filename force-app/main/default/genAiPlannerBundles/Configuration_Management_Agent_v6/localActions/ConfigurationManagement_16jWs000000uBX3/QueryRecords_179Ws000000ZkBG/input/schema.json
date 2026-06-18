@@ -1,0 +1,14 @@
+{
+  "required" : [ "productName" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "productName" : {
+      "title" : "Product Name",
+      "description" : "Full or partial product name to search for",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

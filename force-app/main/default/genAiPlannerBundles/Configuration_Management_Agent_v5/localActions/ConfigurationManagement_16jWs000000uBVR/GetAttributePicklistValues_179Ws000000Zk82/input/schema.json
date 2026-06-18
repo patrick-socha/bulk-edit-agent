@@ -1,0 +1,14 @@
+{
+  "required" : [ "currentPicklistValueId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "currentPicklistValueId" : {
+      "title" : "Current Picklist Value Id",
+      "description" : "The AttributePicklistValue ID currently set on the attribute, read from the GetConfiguratorInstance JSON",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}
