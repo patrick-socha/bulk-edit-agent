@@ -33,22 +33,42 @@ public with sharing class BulkUpdateBundleAttribute {
                 return fail(r, 'quoteId, bundleProductId, attributeName, and desiredValue are all required.');
             }
 
-            // 1) Discover bundle instances.
+            // 0) Resolve optional group/region scope BEFORE any callout. Blank => whole quote.
+            //    Scoping only narrows which instances we MUTATE; loadSession still loads the
+            //    WHOLE quote and save-instance replaces it, so out-of-scope groups are preserved.
+            QuoteLineGroupScope.ScopeResult scope =
+                QuoteLineGroupScope.resolveFromCsv(req.quoteId, req.groupNames);
+            r.scopeDescription = scope.scopingRequested ? scope.scopeDescription : 'entire quote';
+            if (scope.scopingRequested && !scope.unmatchedTokens.isEmpty()) {
+                return fail(r, 'These group names were not found on the quote: ' +
+                    String.join(scope.unmatchedTokens, ', ') + '. Available groups: ' +
+                    String.join(scope.availableGroupNames, ', ') + '.');
+            }
+
+            // 1) Discover bundle instances (+ their group for scoping).
             List<QuoteLineItem> bundleInstances = [
-                SELECT Id FROM QuoteLineItem
+                SELECT Id, QuoteLineGroupId FROM QuoteLineItem
                 WHERE QuoteId = :req.quoteId AND Product2Id = :req.bundleProductId
                 WITH USER_MODE
             ];
-            r.totalBundles = bundleInstances.size();
-            if (bundleInstances.isEmpty()) {
-                return fail(r, 'No instances of that bundle were found on the quote.');
+            Set<Id> instanceIds = new Set<Id>();
+            for (QuoteLineItem qli : bundleInstances) {
+                if (scope.scopingRequested && !scope.groupIds.contains(qli.QuoteLineGroupId)) {
+                    continue;
+                }
+                instanceIds.add(qli.Id);
             }
-            if (bundleInstances.size() > MAX_INSTANCES) {
-                return fail(r, 'Too many bundle instances (' + bundleInstances.size() +
+            r.totalBundles = instanceIds.size(); // scoped count
+            if (instanceIds.isEmpty()) {
+                return fail(r, scope.scopingRequested
+                    ? 'No instances of that bundle were found in the requested group(s): ' +
+                        scope.scopeDescription + '.'
+                    : 'No instances of that bundle were found on the quote.');
+            }
+            if (instanceIds.size() > MAX_INSTANCES) {
+                return fail(r, 'Too many bundle instances (' + instanceIds.size() +
                     ') to process safely in one operation. Please narrow the scope.');
             }
-            Set<Id> instanceIds = new Set<Id>();
-            for (QuoteLineItem qli : bundleInstances) { instanceIds.add(qli.Id); }
 
             // 2) Find the named attribute on each instance (one query, in-memory match).
             //    AttributeName format differs by Salesforce surface: the QuoteLineItemAttribute
@@ -288,6 +308,13 @@ public with sharing class BulkUpdateBundleAttribute {
             required=true
         )
         public String desiredValue;
+
+        @InvocableVariable(
+            label='Group Names'
+            description='Optional. Comma-separated group/region names to limit the change to, e.g. "California, New York". Matched groups include their subgroups automatically. Leave blank to apply to every instance on the quote.'
+            required=false
+        )
+        public String groupNames;
     }
 
     public class Result {
@@ -307,6 +334,8 @@ public with sharing class BulkUpdateBundleAttribute {
         public Integer failedCount = 0;
         @InvocableVariable(label='Results JSON' description='Per-instance: bundleLineItemId, status (UPDATED|SKIPPED_ALREADY|RULE_BLOCKED|FAILED), detail')
         public String resultsJson;
+        @InvocableVariable(label='Scope Description' description='Which groups/regions the change was limited to (e.g. "California (incl. Los Angeles, San Francisco)"), or "entire quote" when not scoped. Use this in the response so the rep knows exactly what was affected.')
+        public String scopeDescription;
         @InvocableVariable(label='Message' description='Human-readable rollup')
         public String message;
         @InvocableVariable(label='Error Message' description='Error or rule-block summary when isSuccess is false (includes allowed values for invalid picklist input)')

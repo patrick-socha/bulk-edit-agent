@@ -1,0 +1,21 @@
+{
+  "required" : [ "quoteId", "bundleProductId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "bundleProductId" : {
+      "title" : "Bundle Product Id",
+      "description" : "The Product2 ID of the bundle",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote being configured",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

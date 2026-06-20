@@ -109,4 +109,135 @@ private class BulkSelectBundleComponentTest {
             '{"configuratorMessages":{}}');
         System.assertEquals(null, ConfiguratorClient.extractBlockingMessage(clean));
     }
+
+    // ── Group-scoping tests ──────────────────────────────────────────────
+    // Builds a quote: NEW YORK (root, 2 bundles), CALIFORNIA (root, 0 direct) with
+    // subgroup LOS ANGELES (1 bundle). Bundle product = `p`.
+    @isTest
+    static void testScopedUnmatchedGroupFailsWithoutCallout() {
+        TestData td = makeGroupedQuote();
+        // No mock set: if the class makes ANY callout it throws, proving fail-fast is callout-free.
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'SELECT';
+        req.quoteId = td.quoteId;
+        req.bundleProductId = td.bundleProductId;
+        req.productRelatedComponentId = '0dS000000000123AAA';
+        req.groupNames = 'Florida';
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        System.assertEquals(false, res[0].isSuccess);
+        System.assert(res[0].errorMessage.contains('not found'), res[0].errorMessage);
+        System.assert(res[0].errorMessage.contains('GEO #1 - NEW YORK'),
+            'should list available groups: ' + res[0].errorMessage);
+    }
+
+    @isTest
+    static void testScopedToNewYorkOnlyCountsScoped() {
+        TestData td = makeGroupedQuote();
+        Test.setMock(HttpCalloutMock.class, new SuccessMock());
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'DESELECT';                 // DESELECT avoids needing a PRC/pricebook
+        req.quoteId = td.quoteId;
+        req.bundleProductId = td.bundleProductId;
+        req.childProductId = td.childProductId;     // not present as a child -> all SKIPPED_ALREADY
+        req.groupNames = 'New York';
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        // Scoped to NY's 2 bundles (not the 3 on the quote).
+        System.assertEquals(2, res[0].totalBundles, 'totalBundles must be the SCOPED count');
+        System.assertEquals('GEO #1 - NEW YORK', res[0].scopeDescription);
+    }
+
+    @isTest
+    static void testScopedToCaliforniaIncludesSubgroup() {
+        TestData td = makeGroupedQuote();
+        Test.setMock(HttpCalloutMock.class, new SuccessMock());
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'DESELECT';
+        req.quoteId = td.quoteId;
+        req.bundleProductId = td.bundleProductId;
+        req.childProductId = td.childProductId;
+        req.groupNames = 'California';
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        // California has 0 direct bundles but 1 in its LA subgroup -> 1 scoped.
+        System.assertEquals(1, res[0].totalBundles, 'must include subgroup bundles');
+        System.assert(res[0].scopeDescription.contains('LOS ANGELES'),
+            'scope desc should note the subgroup: ' + res[0].scopeDescription);
+    }
+
+    @isTest
+    static void testScopedGroupWithNoBundlesOfProduct() {
+        TestData td = makeGroupedQuote();
+        Test.setMock(HttpCalloutMock.class, new SuccessMock());
+        // SAN FRANCISCO exists but has no bundle of this product.
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'DESELECT';
+        req.quoteId = td.quoteId;
+        req.bundleProductId = td.bundleProductId;
+        req.childProductId = td.childProductId;
+        req.groupNames = 'San Francisco';
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        System.assertEquals(false, res[0].isSuccess);
+        System.assert(res[0].errorMessage.contains('requested group'), res[0].errorMessage);
+    }
+
+    @isTest
+    static void testUnscopedBackwardCompatible() {
+        TestData td = makeGroupedQuote();
+        Test.setMock(HttpCalloutMock.class, new SuccessMock());
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'DESELECT';
+        req.quoteId = td.quoteId;
+        req.bundleProductId = td.bundleProductId;
+        req.childProductId = td.childProductId;
+        // no groupNames -> whole quote (all 3 bundles)
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        System.assertEquals(3, res[0].totalBundles, 'unscoped must see all instances');
+        System.assertEquals('entire quote', res[0].scopeDescription);
+    }
+
+    private class TestData {
+        Id quoteId;
+        Id bundleProductId;
+        Id childProductId;
+    }
+
+    private static TestData makeGroupedQuote() {
+        Product2 bundle = new Product2(Name = 'QuantumBit Complete Solution', IsActive = true);
+        Product2 child = new Product2(Name = 'QuantumBit Fundamentals Training', IsActive = true);
+        insert new List<Product2>{ bundle, child };
+
+        Id stdPb = Test.getStandardPricebookId();
+        PricebookEntry pbe = new PricebookEntry(
+            Pricebook2Id = stdPb, Product2Id = bundle.Id, UnitPrice = 100, IsActive = true);
+        insert pbe;
+
+        Quote q = new Quote(Name = 'Scoped Bulk Test', Pricebook2Id = stdPb);
+        insert q;
+
+        QuoteLineGroup ny = new QuoteLineGroup(Name = 'GEO #1 - NEW YORK', QuoteId = q.Id);
+        QuoteLineGroup ca = new QuoteLineGroup(Name = 'GEO #2 - CALIFORNIA', QuoteId = q.Id);
+        insert new List<QuoteLineGroup>{ ny, ca };
+        QuoteLineGroup la = new QuoteLineGroup(Name = 'LOS ANGELES', QuoteId = q.Id, ParentQuoteLineGroupId = ca.Id);
+        QuoteLineGroup sf = new QuoteLineGroup(Name = 'SAN FRANCISCO', QuoteId = q.Id, ParentQuoteLineGroupId = ca.Id);
+        insert new List<QuoteLineGroup>{ la, sf };
+
+        List<QuoteLineItem> qlis = new List<QuoteLineItem>();
+        for (Integer i = 0; i < 2; i++) {
+            qlis.add(new QuoteLineItem(QuoteId = q.Id, Product2Id = bundle.Id,
+                PricebookEntryId = pbe.Id, Quantity = 1, UnitPrice = 100, QuoteLineGroupId = ny.Id));
+        }
+        qlis.add(new QuoteLineItem(QuoteId = q.Id, Product2Id = bundle.Id,
+            PricebookEntryId = pbe.Id, Quantity = 1, UnitPrice = 100, QuoteLineGroupId = la.Id));
+        insert qlis;
+
+        TestData td = new TestData();
+        td.quoteId = q.Id;
+        td.bundleProductId = bundle.Id;
+        td.childProductId = child.Id;
+        return td;
+    }
 }

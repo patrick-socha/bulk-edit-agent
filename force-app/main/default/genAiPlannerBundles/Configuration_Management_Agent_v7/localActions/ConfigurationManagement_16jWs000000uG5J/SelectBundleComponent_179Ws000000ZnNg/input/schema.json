@@ -1,0 +1,42 @@
+{
+  "required" : [ "operation", "quoteId", "bundleLineItemId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "bundleLineItemId" : {
+      "title" : "Bundle Line Item Id",
+      "description" : "The QuoteLineItem ID of the parent bundle on the quote",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "operation" : {
+      "title" : "Operation",
+      "description" : "SELECT to turn on a predefined option, DESELECT to turn one off",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "productRelatedComponentId" : {
+      "title" : "Product Related Component Id",
+      "description" : "SELECT only: the productRelatedComponentId of the option to turn on (from ListBundleComponentOptions)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote being configured",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "selectedLineItemId" : {
+      "title" : "Selected Line Item Id",
+      "description" : "DESELECT only: the selectedLineItemId of the currently-selected component to turn off",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

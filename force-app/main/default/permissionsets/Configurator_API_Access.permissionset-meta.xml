@@ -12,7 +12,7 @@
         <externalCredentialPrincipal>Configurator_API_Cred-Configurator_Principal</externalCredentialPrincipal>
     </externalCredentialPrincipalAccesses>
 
-    <!-- Apex class access for all 13 agent action classes. The planner validates
+    <!-- Apex class access for the agent action classes. The planner validates
          every action at startup, so the running user needs access to all of them. -->
     <classAccesses>
         <apexClass>LoadConfiguratorSession</apexClass>
@@ -24,10 +24,6 @@
     </classAccesses>
     <classAccesses>
         <apexClass>SaveConfiguratorInstance</apexClass>
-        <enabled>true</enabled>
-    </classAccesses>
-    <classAccesses>
-        <apexClass>SetConfiguratorInstance</apexClass>
         <enabled>true</enabled>
     </classAccesses>
     <classAccesses>
@@ -52,10 +48,6 @@
     </classAccesses>
     <classAccesses>
         <apexClass>ExecuteConfigurationRules</apexClass>
-        <enabled>true</enabled>
-    </classAccesses>
-    <classAccesses>
-        <apexClass>ManageSavedConfiguration</apexClass>
         <enabled>true</enabled>
     </classAccesses>
     <classAccesses>
@@ -88,6 +80,14 @@
     </classAccesses>
     <classAccesses>
         <apexClass>BulkUpdateBundleAttribute</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>QuoteLineGroupScope</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ListQuoteLineGroups</apexClass>
         <enabled>true</enabled>
     </classAccesses>
 </PermissionSet>

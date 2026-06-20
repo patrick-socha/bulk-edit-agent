@@ -1,0 +1,42 @@
+{
+  "required" : [ "operation", "quoteId", "bundleProductId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "bundleProductId" : {
+      "title" : "Bundle Product Id",
+      "description" : "The Product2 ID of the bundle; every instance of this product on the quote is updated",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "childProductId" : {
+      "title" : "Child Product Id",
+      "description" : "DESELECT only: the Product2 ID of the component to turn off across all instances",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "operation" : {
+      "title" : "Operation",
+      "description" : "SELECT to turn a component on for every bundle instance, DESELECT to turn it off",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "productRelatedComponentId" : {
+      "title" : "Product Related Component Id",
+      "description" : "SELECT only: the option to turn on across all instances (from ListBundleComponentOptions)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote being configured",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

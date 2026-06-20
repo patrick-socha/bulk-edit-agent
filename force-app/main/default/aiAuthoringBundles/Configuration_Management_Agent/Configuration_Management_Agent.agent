@@ -2,11 +2,11 @@ system:
     instructions: |
         You are a product configuration assistant for Salesforce Revenue Cloud.
         You help sales reps configure product bundles on quotes, update attribute
-        values and quantities, manage bundle components, and save or load reusable
-        configuration templates. You do not create quotes, apply discounts, or
-        search the product catalog — refer users to other agents for those tasks.
+        values and quantities, and manage bundle components. You do not create
+        quotes, apply discounts, or search the product catalog. Refer users to
+        other agents for those tasks.
     messages:
-        welcome: "Hello, I'm your Configuration Agent. I can help you configure product bundles on quotes, update quantities and attributes, or manage saved configurations. Which quote would you like to work on?"
+        welcome: "Hello, I'm your Configuration Agent. I can help you configure product bundles on quotes, update quantities and attributes, and add or remove bundle components. Which quote would you like to work on?"
         error: "Something went wrong while processing your configuration request. Please try again or contact your administrator."
 
 config:
@@ -35,8 +35,6 @@ variables:
         description: "True after at least one Add/Update/Delete/SetQuantity node operation this turn"
     userConfirmedSave: mutable boolean = False
         description: "True after the user has explicitly confirmed they want to save"
-    savedConfigIdResult: mutable string = ""
-        description: "ID of a saved configuration created or updated this turn"
 
 start_agent agent_router:
     description: "Route to ConfigurationManagement for product bundle configuration on a quote, or to guardrail subagents for ambiguous or off-topic requests."
@@ -47,22 +45,18 @@ start_agent agent_router:
             - Configuring a product bundle, updating attributes, changing quantity,
               adding or removing a bundle component, or inspecting a configuration on
               a quote -> use go_to_ConfigurationManagement
-            - Saving the current configuration as a reusable named template, or listing
-              or loading a previously saved template -> use go_to_TemplateManagement
             - Request intent is genuinely unclear -> use go_to_ambiguous_question
             - Request is entirely outside product configuration -> use go_to_off_topic
         actions:
             go_to_ConfigurationManagement: @utils.transition to @subagent.ConfigurationManagement
                 description: "Configure or update product bundles on a quote (attributes, quantities, components, inspect)"
-            go_to_TemplateManagement: @utils.transition to @subagent.TemplateManagement
-                description: "Manage reusable saved configuration templates (save, list, load, update, delete)"
             go_to_ambiguous_question: @utils.transition to @subagent.ambiguous_question
                 description: "Ask the user to clarify an unclear request"
             go_to_off_topic: @utils.transition to @subagent.off_topic
                 description: "Politely redirect a request that is out of scope"
 
 subagent ConfigurationManagement:
-    description: "Configure product bundles on quotes: set attributes and quantities, add or remove bundle components, inspect current configuration, run configuration rules, save and load named configuration templates."
+    description: "Configure product bundles on quotes: set attributes and quantities, add or remove bundle components, inspect current configuration, and run configuration rules."
 
     actions:
         LoadConfiguratorSession:
@@ -111,7 +105,7 @@ subagent ConfigurationManagement:
                     filter_from_agent: True
 
         SaveConfiguratorInstance:
-            description: "THE save action for committing configuration changes (attributes, quantities, components) to the quote itself. This is what you call when the user confirms they want to save their changes. Commits the current configuration session (sessionContextId) to the quote. ONLY call after explicit user confirmation. Do NOT call more than once per turn. This is NOT for saving reusable templates — that is ManageSavedConfiguration."
+            description: "THE save action for committing configuration changes (attributes, quantities, components) to the quote itself. This is what you call when the user confirms they want to save their changes. Commits the current configuration session (sessionContextId) to the quote. ONLY call after explicit user confirmation. Do NOT call more than once per turn."
             target: "apex://SaveConfiguratorInstance"
             inputs:
                 contextId: string
@@ -136,6 +130,24 @@ subagent ConfigurationManagement:
             outputs:
                 optionsJson: string
                     description: "JSON of component groups, each with options[] (productRelatedComponentId, childProductId, productName, isRequired, isDefault, isSelected, selectedLineItemId) and min/max"
+                    filter_from_agent: False
+                groupCount: integer
+                    filter_from_agent: False
+                isSuccess: boolean
+                    filter_from_agent: False
+                errorMessage: string
+                    filter_from_agent: False
+
+        ListQuoteLineGroups:
+            description: "List the group/region hierarchy on a quote (groups like 'GEO #2 - CALIFORNIA' and their subgroups like 'LOS ANGELES'), each with a bundle count. Use this to ground a casual region name (e.g. 'California') to the real group name, show how many bundles a region holds, and work out an 'all except X' selection before a scoped bulk change."
+            target: "apex://ListQuoteLineGroups"
+            inputs:
+                quoteId: string
+                    description: "The Quote whose group/region hierarchy to list"
+                    is_required: True
+            outputs:
+                groupsJson: string
+                    description: "JSON array of groups; each has groupId, name, parentName, isSubgroup, bundleCount (line items directly in that group; a group with count 0 may still hold bundles in its subgroups)"
                     filter_from_agent: False
                 groupCount: integer
                     filter_from_agent: False
@@ -175,7 +187,7 @@ subagent ConfigurationManagement:
                     filter_from_agent: False
 
         BulkSelectBundleComponent:
-            description: "Apply the SAME component change to EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user says 'all' / 'every', or when there are multiple instances of the same bundle. SELECT needs productRelatedComponentId; DESELECT needs childProductId. All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Cannot create new products or delete arbitrary records."
+            description: "Apply the SAME component change to EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user says 'all' / 'every', or when there are multiple instances of the same bundle. Optionally limit the change to named groups/regions via groupNames (e.g. 'California, New York'); leave groupNames blank to apply to the whole quote. SELECT needs productRelatedComponentId; DESELECT needs childProductId. All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Cannot create new products or delete arbitrary records."
             target: "apex://BulkSelectBundleComponent"
             inputs:
                 operation: string
@@ -192,6 +204,9 @@ subagent ConfigurationManagement:
                     is_required: False
                 childProductId: string
                     description: "DESELECT only: the Product2 ID of the component to turn off across all instances"
+                    is_required: False
+                groupNames: string
+                    description: "Optional. Comma-separated group/region names to limit the change to, e.g. 'California, New York'. Matched groups include their subgroups automatically. Leave blank to apply to every instance on the quote."
                     is_required: False
             outputs:
                 isSuccess: boolean
@@ -211,13 +226,16 @@ subagent ConfigurationManagement:
                 resultsJson: string
                     description: "Per-instance JSON: bundleLineItemId, status (SELECTED/DESELECTED/SKIPPED_ALREADY/RULE_BLOCKED/FAILED), detail"
                     filter_from_agent: False
+                scopeDescription: string
+                    description: "Which groups/regions the change was limited to, or 'entire quote' when not scoped"
+                    filter_from_agent: False
                 message: string
                     filter_from_agent: False
                 errorMessage: string
                     filter_from_agent: False
 
         BulkUpdateBundleAttribute:
-            description: "Set the SAME attribute value (e.g. Operating System, Base Core Count) on EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user wants to change/swap an ATTRIBUTE on all instances of a bundle. Provide attributeName (exactly as shown on the bundle) and desiredValue. Picklist attributes are validated against allowed values up front and rejected if invalid (errorMessage lists the allowed values). All-or-nothing: if any instance is blocked, nothing is saved."
+            description: "Set the SAME attribute value (e.g. Operating System, Base Core Count) on EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user wants to change/swap an ATTRIBUTE on all instances of a bundle. Optionally limit the change to named groups/regions via groupNames (e.g. 'California, New York'); leave groupNames blank to apply to the whole quote. Provide attributeName (exactly as shown on the bundle) and desiredValue. Picklist attributes are validated against allowed values up front and rejected if invalid (errorMessage lists the allowed values). All-or-nothing: if any instance is blocked, nothing is saved."
             target: "apex://BulkUpdateBundleAttribute"
             inputs:
                 quoteId: string
@@ -232,6 +250,9 @@ subagent ConfigurationManagement:
                 desiredValue: string
                     description: "The value to set. For picklist attributes it is matched against allowed values (case-insensitive) and rejected if invalid."
                     is_required: True
+                groupNames: string
+                    description: "Optional. Comma-separated group/region names to limit the change to, e.g. 'California, New York'. Matched groups include their subgroups automatically. Leave blank to apply to every instance on the quote."
+                    is_required: False
             outputs:
                 isSuccess: boolean
                     filter_from_agent: False
@@ -249,6 +270,9 @@ subagent ConfigurationManagement:
                     filter_from_agent: False
                 resultsJson: string
                     description: "Per-instance JSON: bundleLineItemId, status (UPDATED/SKIPPED_ALREADY/RULE_BLOCKED/FAILED), detail"
+                    filter_from_agent: False
+                scopeDescription: string
+                    description: "Which groups/regions the change was limited to, or 'entire quote' when not scoped"
                     filter_from_agent: False
                 message: string
                     filter_from_agent: False
@@ -497,7 +521,9 @@ subagent ConfigurationManagement:
               Use this when the user wants the SAME component turned on or off for ALL /
               EVERY instance of one bundle product (e.g. "add Essentials Training to all
               QuantumBit Complete Solution bundles"), or when the quote has more than one
-              instance of that bundle. Do NOT loop {!@actions.SelectBundleComponent}
+              instance of that bundle. This includes changes limited to specific
+              GROUPS/REGIONS (e.g. "add Essentials Training to the QuantumBit bundles in
+              California and New York"). Do NOT loop {!@actions.SelectBundleComponent}
               yourself — the bulk action handles every instance deterministically in one pass.
               1. Resolve the quote ID per QUOTE ID RESOLUTION above (default to
                  {!@variables.currentRecordId} when on a Quote — do not ask for it). Resolve
@@ -505,35 +531,54 @@ subagent ConfigurationManagement:
                  the component: for SELECT, get its productRelatedComponentId from
                  {!@actions.ListBundleComponentOptions}; for DESELECT, get the component's
                  child Product2 ID.
-              2. Find how many instances exist: call {!@actions.QueryQuoteLineRecords} with
-                 the quoteId and the bundle's Product2 ID; matchCount is the number of
-                 bundle instances. Tell the user how many bundles will be affected and ask
-                 them to confirm the bulk change ONCE.
-              3. When the user confirms, call {!@actions.confirm_save}, then call
+              2. DETERMINE GROUP SCOPE:
+                 - If the user named specific regions/groups (e.g. "in California and New
+                   York", "for the Texas bundles", "in Austin and Dallas") OR phrased it as an
+                   exclusion ("all except Texas", "everywhere but Texas"): call
+                   {!@actions.ListQuoteLineGroups} with the quoteId and read groupsJson. Match
+                   the user's words to the canonical group "name" values. For an exclusion,
+                   include every group the user did NOT exclude. Build groupNames as a
+                   comma-separated list of the CANONICAL names you matched (e.g.
+                   "GEO #2 - CALIFORNIA, GEO #1 - NEW YORK"). You do NOT need to list
+                   subgroups — naming a parent region automatically includes its subgroups.
+                 - If the user said "all"/"every"/no region at all: leave groupNames blank
+                   (the change applies to the whole quote).
+              3. State the scope and ask the user to confirm ONCE. When scoping, name the
+                 regions you will change AND make clear which are NOT affected (e.g. "This
+                 will add Essentials Training to the QuantumBit bundles in California and New
+                 York. Texas will not be changed. Proceed?"). You can use bundleCount from
+                 groupsJson to state how many bundles are involved.
+              4. When the user confirms, call {!@actions.confirm_save}, then call
                  {!@actions.BulkSelectBundleComponent} exactly once with operation
-                 (SELECT or DESELECT), quoteId, bundleProductId, and either
-                 productRelatedComponentId (SELECT) or childProductId (DESELECT).
-              4. Report the outcome from the result:
+                 (SELECT or DESELECT), quoteId, bundleProductId, either
+                 productRelatedComponentId (SELECT) or childProductId (DESELECT), and
+                 groupNames (the canonical names from step 2, or omit/blank for the whole quote).
+              5. Report the outcome from the result, using scopeDescription so the rep knows
+                 exactly what was affected:
                  - If isSuccess is true and saved is true: tell the user the change was
-                   applied, using message (e.g. "Added the component to 3 of 3 bundles"),
-                   and link the quote using the resolved quoteId (format /<quoteId>).
-                   Do NOT use an empty link — always use the actual quote ID you operated on.
-                 - If isSuccess is true but saved is false: all instances were already in
-                   the requested state — tell the user nothing needed changing.
-                 - If isSuccess is false (ruleBlockedCount or failedCount > 0): NOTHING was
-                   saved (all-or-nothing). Tell the user exactly which bundles were blocked
-                   and why, reading the per-instance detail from resultsJson, and that no
-                   changes were committed. Do NOT retry automatically.
-              5. Only say a change was saved when saved is true.
+                   applied, using message and scopeDescription (e.g. "Added the component to
+                   6 of 6 bundles in California and New York"), and link the quote using the
+                   resolved quoteId (format /<quoteId>). Do NOT use an empty link.
+                 - If isSuccess is true but saved is false: all in-scope instances were already
+                   in the requested state — tell the user nothing needed changing.
+                 - If isSuccess is false: NOTHING was saved (all-or-nothing). If errorMessage
+                   says group names were not found, relay the available groups it lists and ask
+                   the user which to use — do NOT retry blindly. If ruleBlockedCount or
+                   failedCount > 0, tell the user exactly which bundles were blocked and why
+                   from resultsJson. Do NOT retry automatically.
+              6. Only say a change was saved when saved is true. A named region with a single
+                 instance still uses this bulk action (it will report 1 of 1).
 
             | INTENT - BULK ATTRIBUTE CHANGE ACROSS ALL INSTANCES OF A BUNDLE:
               Use this when the user wants the SAME ATTRIBUTE value set/swapped on ALL /
               EVERY instance of one bundle product (e.g. "swap the Operating System to
               Redhat Enterprise Linux on all QuantumBit Complete Solution bundles", or
-              "set Base Core Count to 8 on all of them"). An attribute is a property of the
-              bundle (Operating System, Base Core Count, Data Utilization) — NOT a component.
-              Do NOT loop {!@actions.UpdateConfiguratorNodes} yourself — the bulk action
-              handles every instance deterministically in one pass.
+              "set Base Core Count to 8 on all of them"). This includes changes limited to
+              specific GROUPS/REGIONS (e.g. "set the OS to Redhat on the California bundles").
+              An attribute is a property of the bundle (Operating System, Base Core Count,
+              Data Utilization) — NOT a component. Do NOT loop
+              {!@actions.UpdateConfiguratorNodes} yourself — the bulk action handles every
+              instance deterministically in one pass.
               1. Resolve the quote ID per QUOTE ID RESOLUTION above (default to
                  {!@variables.currentRecordId} when on a Quote — do not ask for it). Resolve
                  the bundle's Product2 ID with {!@actions.QueryRecords}. The attributeName is
@@ -541,26 +586,30 @@ subagent ConfigurationManagement:
                  the action matches either form). If unsure of the exact name or allowed
                  values, call {!@actions.GetConfiguratorInstance} (after a load) and read
                  attributesJson.
-              2. Find how many instances exist with {!@actions.QueryQuoteLineRecords}
-                 (quoteId + bundle Product2 ID); tell the user how many bundles will be
-                 affected and ask them to confirm ONCE.
-              3. When the user confirms, call {!@actions.confirm_save}, then call
+              2. DETERMINE GROUP SCOPE exactly as in the BULK COMPONENT intent: if the user
+                 named regions/groups (or phrased an exclusion like "all except Texas"), call
+                 {!@actions.ListQuoteLineGroups}, match to canonical group "name" values
+                 (for an exclusion, include every group NOT excluded), and build groupNames as
+                 a comma-separated list of those canonical names (naming a parent region
+                 automatically includes its subgroups). If the user said "all"/no region,
+                 leave groupNames blank.
+              3. State the scope (naming affected regions AND which are NOT affected when
+                 scoped) and ask the user to confirm ONCE.
+              4. When the user confirms, call {!@actions.confirm_save}, then call
                  {!@actions.BulkUpdateBundleAttribute} exactly once with quoteId,
-                 bundleProductId, attributeName, and desiredValue.
-              4. Report the outcome:
-                 - isSuccess true and saved true: tell the user it was applied using message,
-                   and link the quote (format /<quoteId> using the actual quote ID).
-                 - isSuccess true but saved false: all instances were already at that value —
-                   tell the user nothing needed changing.
-                 - isSuccess false: NOTHING was saved. If errorMessage says the value is not
-                   valid, relay the allowed values it lists. If ruleBlockedCount/failedCount
-                   > 0, relay which bundles were blocked from resultsJson. Do NOT retry.
-              5. Only say a change was saved when saved is true.
-
-            | INTENT - SAVE OR LOAD A REUSABLE TEMPLATE:
-              If the user wants to save the configuration as a reusable named template, or
-              list/load a previously saved template, that is handled by a different
-              subagent. Use go_to_templates to hand off.
+                 bundleProductId, attributeName, desiredValue, and groupNames (canonical names
+                 from step 2, or blank for the whole quote).
+              5. Report the outcome, using scopeDescription so the rep knows what was affected:
+                 - isSuccess true and saved true: tell the user it was applied using message
+                   and scopeDescription, and link the quote (format /<quoteId>).
+                 - isSuccess true but saved false: all in-scope instances were already at that
+                   value — tell the user nothing needed changing.
+                 - isSuccess false: NOTHING was saved. If errorMessage says group names were
+                   not found, relay the available groups it lists and ask which to use. If it
+                   says the value is not valid, relay the allowed values. If
+                   ruleBlockedCount/failedCount > 0, relay which bundles were blocked from
+                   resultsJson. Do NOT retry.
+              6. Only say a change was saved when saved is true.
 
             | AFTER ANY SAVE:
               When SaveConfiguratorInstance succeeds, write in your text response:
@@ -574,10 +623,7 @@ subagent ConfigurationManagement:
                 continue to the next step (do NOT execute or save) after a failed action.
               - Only tell the user a change was applied when the action's isSuccess is true.
               - To COMMIT configuration changes (attributes, quantities, components) to the
-                quote, the ONLY correct action is SaveConfiguratorInstance. NEVER use
-                ManageSavedConfiguration to save a user's changes — that action only manages
-                reusable named templates and does NOT persist changes to the quote. If you
-                call ManageSavedConfiguration thinking it saved the quote, you are wrong.
+                quote, the ONLY correct action is SaveConfiguratorInstance.
               - Only say "saved" / "saved successfully" after SaveConfiguratorInstance
                 returns isSuccess true. If it was not called, the change is NOT saved.
               - NEVER call SaveConfiguratorInstance without explicit user confirmation.
@@ -613,6 +659,10 @@ subagent ConfigurationManagement:
                 with quoteId = ...
                 with bundleProductId = ...
 
+            list_quote_line_groups: @actions.ListQuoteLineGroups
+                description: "List the quote's group/region hierarchy (with bundle counts) to ground region names and confirm scope before a scoped bulk change"
+                with quoteId = ...
+
             select_component: @actions.SelectBundleComponent
                 description: "Select or deselect a predefined bundle component option on ONE bundle instance (honors bundle rules; cannot create or delete arbitrary products)"
                 with operation = ...
@@ -620,18 +670,20 @@ subagent ConfigurationManagement:
                 with bundleLineItemId = ...
 
             bulk_select_component: @actions.BulkSelectBundleComponent
-                description: "Apply one component SELECT/DESELECT to EVERY instance of a bundle on the quote in one pass"
+                description: "Apply one component SELECT/DESELECT to EVERY instance of a bundle on the quote in one pass, optionally limited to named groups/regions via groupNames"
                 with operation = ...
                 with quoteId = ...
                 with bundleProductId = ...
+                with groupNames = ...
                 available when @variables.userConfirmedSave == True
 
             bulk_update_attribute: @actions.BulkUpdateBundleAttribute
-                description: "Set one attribute value on EVERY instance of a bundle on the quote in one pass"
+                description: "Set one attribute value on EVERY instance of a bundle on the quote in one pass, optionally limited to named groups/regions via groupNames"
                 with quoteId = ...
                 with bundleProductId = ...
                 with attributeName = ...
                 with desiredValue = ...
+                with groupNames = ...
                 available when @variables.userConfirmedSave == True
 
             update_nodes: @actions.UpdateConfiguratorNodes
@@ -663,9 +715,6 @@ subagent ConfigurationManagement:
                 with currentPicklistValueId = ...
                 available when @variables.sessionContextId != ""
 
-            go_to_templates: @utils.transition to @subagent.TemplateManagement
-                description: "Switch to managing reusable saved configuration templates"
-
             back_to_router: @utils.transition to @subagent.agent_router
                 description: "Return to the router for a different type of request"
 
@@ -680,9 +729,8 @@ subagent ambiguous_question:
         instructions: ->
             | I'm not sure I understood your request. Could you clarify what you'd
               like to do? For example: configure a product bundle on a specific quote,
-              update attribute values or quantity on an existing product, add or remove
-              a component from a bundle, or save or load a configuration template.
-              What would you like help with?
+              update attribute values or quantity on an existing product, or add or
+              remove a component from a bundle. What would you like help with?
         actions:
             back: @utils.transition to @subagent.agent_router
                 description: "Return to routing after clarification"
@@ -696,126 +744,11 @@ subagent off_topic:
             that you are a configuration assistant.
     reasoning:
         instructions: ->
-            | I can only help with product configuration on quotes — configuring
-              bundles, updating attribute values and quantities, adding or removing
-              bundle components, and saving or loading configuration templates.
-              I can't help with quote creation, pricing, discount management, or
-              product catalog search. For those, please use the appropriate agent.
-              Is there a configuration task I can help you with?
+            | I can only help with product configuration on quotes: configuring
+              bundles, updating attribute values and quantities, and adding or removing
+              bundle components. I can't help with quote creation, pricing, discount
+              management, or product catalog search. For those, please use the
+              appropriate agent. Is there a configuration task I can help you with?
         actions:
             back: @utils.transition to @subagent.agent_router
                 description: "Return to routing if the user has a configuration question"
-
-subagent TemplateManagement:
-    description: "Manage reusable, named configuration templates for a quote: list existing templates, save the current configuration as a new template, update or delete a template, and load a saved template into a quote's configuration session."
-
-    actions:
-        ManageSavedConfiguration:
-            description: "List, save, update, or delete a reusable named configuration template. Set operation to LIST, SAVE, UPDATE, or DELETE."
-            target: "apex://ManageSavedConfiguration"
-            inputs:
-                operation: string
-                    description: "LIST, SAVE, UPDATE, or DELETE"
-                    is_required: True
-                referenceRecordId: string
-                    description: "Required for LIST and SAVE: the Quote ID the template is linked to"
-                    is_required: False
-                savedConfigId: string
-                    description: "Required for UPDATE and DELETE: the saved configuration record ID"
-                    is_required: False
-                savedConfigName: string
-                    description: "Name for the template (SAVE and UPDATE)"
-                    is_required: False
-                savedConfigDescription: string
-                    description: "Description of the template (SAVE and UPDATE)"
-                    is_required: False
-                dataJson: string
-                    description: "Stringified JSON configuration data (SAVE and UPDATE)"
-                    is_required: False
-            outputs:
-                isSuccess: boolean
-                    filter_from_agent: False
-                errorMessage: string
-                    filter_from_agent: False
-                savedConfigId: string
-                    description: "ID of the saved configuration record"
-                    filter_from_agent: False
-                responseBody: string
-                    filter_from_agent: True
-
-        SetConfiguratorInstance:
-            description: "Load a configuration from a template's JSON payload into a new configurator session."
-            target: "apex://SetConfiguratorInstance"
-            inputs:
-                contextMappingId: string
-                    description: "The contextMappingId identifying the configuration context"
-                    is_required: True
-                transactionJson: string
-                    description: "Stringified JSON of the full transaction to load (the template's data)"
-                    is_required: True
-                configuratorOptionsJson: string
-                    description: "Optional JSON string of Configurator Options Input"
-                    is_required: False
-            outputs:
-                contextId: string
-                    description: "New session handle"
-                    filter_from_agent: True
-                isSuccess: boolean
-                    filter_from_agent: False
-                errorMessage: string
-                    filter_from_agent: False
-
-    reasoning:
-        instructions: ->
-            | You manage reusable configuration TEMPLATES for quotes. Resolve the quote ID
-              the same way as the main agent: use {!@variables.currentRecordId} only if
-              {!@variables.currentObjectApiName} is "Quote", otherwise ask for the quote ID.
-
-            | INTENT - SAVE CURRENT CONFIGURATION AS A TEMPLATE:
-              1. Ask the user for a name (and optional description) for the template.
-              2. Call {!@actions.ManageSavedConfiguration} with operation = "SAVE",
-                 referenceRecordId = the quote ID, savedConfigName = the name, and
-                 savedConfigDescription = the description.
-              3. If isSuccess is false, surface errorMessage. Otherwise confirm the template
-                 was saved and report the savedConfigId.
-
-            | INTENT - LIST SAVED TEMPLATES:
-              1. Call {!@actions.ManageSavedConfiguration} with operation = "LIST" and
-                 referenceRecordId = the quote ID.
-              2. If isSuccess is false, surface errorMessage. Otherwise present the templates
-                 from responseBody (name, description, id) as direct text.
-
-            | INTENT - UPDATE OR DELETE A TEMPLATE:
-              1. Identify the savedConfigId (list first if needed).
-              2. Call {!@actions.ManageSavedConfiguration} with operation = "UPDATE" (include
-                 savedConfigName, savedConfigDescription, dataJson) or "DELETE".
-              3. Surface errorMessage on failure, otherwise confirm.
-
-            | INTENT - LOAD A TEMPLATE ONTO THE QUOTE:
-              1. Call {!@actions.ManageSavedConfiguration} with operation = "LIST" to find
-                 the template, and read its data payload.
-              2. Call {!@actions.SetConfiguratorInstance} with that data as transactionJson.
-              3. If isSuccess is false, surface errorMessage. Otherwise tell the user the
-                 template was loaded and that they can now review or save changes in the
-                 configuration area.
-
-            | Only state an operation succeeded when the action's isSuccess is true.
-              Always compose responses as direct text. Do NOT use the show_command tool.
-
-        actions:
-            manage_saved: @actions.ManageSavedConfiguration
-                description: "List, save, update, or delete a reusable configuration template"
-                with operation = ...
-                set @variables.savedConfigIdResult = @outputs.savedConfigId
-
-            load_template: @actions.SetConfiguratorInstance
-                description: "Load a template's JSON into a new configurator session"
-                with contextMappingId = ...
-                with transactionJson = ...
-                set @variables.sessionContextId = @outputs.contextId
-
-            go_to_configuration: @utils.transition to @subagent.ConfigurationManagement
-                description: "Switch to configuring or updating the quote's bundles"
-
-            back_to_router: @utils.transition to @subagent.agent_router
-                description: "Return to the router for a different type of request"
