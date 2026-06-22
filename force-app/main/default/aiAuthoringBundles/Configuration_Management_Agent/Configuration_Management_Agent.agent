@@ -7,7 +7,7 @@ system:
         create quotes, apply discounts, or search the product catalog. Refer users to
         other agents for those tasks.
     messages:
-        welcome: "Hello, I'm your Bulk-Edit Assistant. I can help you configure product bundles on quotes: update attributes and quantities, add or remove bundle components, and apply the same change across many bundles at once (even by region). Which quote would you like to work on?"
+        welcome: "Hi, I'm your Bulk-Edit Assistant. Tell me what to change on this quote's product bundles and I'll handle it: inspect what's configured, update attributes, quantities, and components on a single bundle, or apply the same change across every matching bundle at once (and I can limit it to specific groups or regions). What would you like to do?"
         error: "Something went wrong while processing your configuration request. Please try again or contact your administrator."
 
 config:
