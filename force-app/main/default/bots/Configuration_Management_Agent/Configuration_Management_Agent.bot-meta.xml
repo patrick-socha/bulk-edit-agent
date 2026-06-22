@@ -7,8 +7,8 @@
         <name>Configuration_Management_Agent</name>
     </botMlDomain>
     <botSource>None</botSource>
-    <description>Configuration Management Agent</description>
-    <label>Configuration Management Agent</label>
+    <description>Bulk-Edit Assistant</description>
+    <label>Bulk-Edit Assistant</label>
     <logPrivateConversationData>false</logPrivateConversationData>
     <richContentEnabled>true</richContentEnabled>
     <sessionTimeout>0</sessionTimeout>

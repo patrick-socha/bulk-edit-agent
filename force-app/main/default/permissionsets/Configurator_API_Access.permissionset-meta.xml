@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
     <label>Configurator API Access</label>
-    <description>Grants access to the Configurator_API external credential principal and all Configuration Management Agent Apex classes.</description>
+    <description>Grants access to the Configurator_API external credential principal and all Bulk-Edit Assistant Apex classes.</description>
     <hasActivationRequired>false</hasActivationRequired>
 
     <!-- External Credential principal access: lets the running user use the

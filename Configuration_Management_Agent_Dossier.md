@@ -1,8 +1,8 @@
-# Configuration Management Agent — Capability & Architecture Dossier
+# Bulk-Edit Assistant (Capability & Architecture Dossier)
 
 ## Executive Summary
 
-The **Configuration Management Agent** is a production-published Agentforce employee agent that lets sales reps configure Salesforce Revenue Cloud product bundles on quotes using plain language — inspecting configurations, changing attributes and quantities, selecting/swapping bundle components, and applying changes in **bulk across every instance of a bundle in a single request**. It is backed by the Salesforce Product Configurator Business APIs via Invocable Apex, and it has been verified end-to-end against live quote data, including multi-instance bulk operations, idempotent re-runs, and rule-blocked safety paths.
+The **Bulk-Edit Assistant** is a production-published Agentforce employee agent that lets sales reps configure Salesforce Revenue Cloud product bundles on quotes using plain language: inspecting configurations, changing attributes and quantities, selecting/swapping bundle components, and applying changes in **bulk across every instance of a bundle (optionally scoped to specific groups/regions) in a single request**. It is backed by the Salesforce Product Configurator Business APIs via Invocable Apex, and it has been verified end-to-end against live quote data, including multi-instance bulk operations, idempotent re-runs, and rule-blocked safety paths.
 
 It replaces slow, error-prone manual clicking through the configurator UI with a conversational, rules-respecting, deterministic automation layer.
 

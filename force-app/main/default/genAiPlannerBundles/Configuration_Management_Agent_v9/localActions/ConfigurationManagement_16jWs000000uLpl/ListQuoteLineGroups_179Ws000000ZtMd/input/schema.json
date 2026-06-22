@@ -1,0 +1,14 @@
+{
+  "required" : [ "quoteId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote whose group/region hierarchy to list",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

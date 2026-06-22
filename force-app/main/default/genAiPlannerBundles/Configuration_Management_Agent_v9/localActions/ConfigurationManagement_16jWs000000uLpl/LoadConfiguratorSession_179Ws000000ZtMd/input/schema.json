@@ -1,0 +1,21 @@
+{
+  "required" : [ "transactionId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "configuratorOptionsJson" : {
+      "title" : "Configurator Options Json",
+      "description" : "Optional JSON string of Configurator Options Input",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "transactionId" : {
+      "title" : "Transaction Id",
+      "description" : "The Quote ID",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

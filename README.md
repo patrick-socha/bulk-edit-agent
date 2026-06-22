@@ -1,4 +1,4 @@
-# Configuration Management Agent
+# Bulk-Edit Assistant
 
 An **Agentforce employee agent** that lets sales reps configure Salesforce Revenue
 Cloud product bundles on quotes using plain language: inspect a configuration,
@@ -216,9 +216,10 @@ found" for everyone.
 
 ### 8. Assign the agent's connection/bot user
 For an **employee agent**, the published agent needs a running user assigned in
-**Setup, Agentforce Agents, Configuration Management Agent**. Until this is set,
+**Setup, Agentforce Agents, Bulk-Edit Assistant**. Until this is set,
 the live in-UI experience cannot execute actions (the CLI `--use-live-actions`
-preview works without it).
+preview works without it). (The agent's developer/API name remains
+`Configuration_Management_Agent`, which is what the CLI commands below use.)
 
 ---
 

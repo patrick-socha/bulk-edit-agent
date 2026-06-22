@@ -1,0 +1,35 @@
+{
+  "required" : [ "contextId", "quantity", "transactionLinePathJson" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "configuratorOptionsJson" : {
+      "title" : "Configurator Options Json",
+      "description" : "Optional JSON string of Configurator Options Input",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "contextId" : {
+      "title" : "Context Id",
+      "description" : "Session handle from LoadConfiguratorSession",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quantity" : {
+      "title" : "Quantity",
+      "description" : "The new quantity",
+      "lightning:type" : "lightning__integerType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "transactionLinePathJson" : {
+      "title" : "Transaction Line Path Json",
+      "description" : "JSON array path to the line item quantity field",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}
