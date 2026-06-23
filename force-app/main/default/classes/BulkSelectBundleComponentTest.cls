@@ -29,6 +29,7 @@ private class BulkSelectBundleComponentTest {
         }
     }
 
+
     @isTest
     static void testInvalidOperation() {
         BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
@@ -38,7 +39,7 @@ private class BulkSelectBundleComponentTest {
         List<BulkSelectBundleComponent.Result> res =
             BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
         System.assertEquals(false, res[0].isSuccess);
-        System.assert(res[0].errorMessage.contains('SELECT or DESELECT'));
+        System.assert(res[0].errorMessage.contains('SELECT, DESELECT, or SWAP'), res[0].errorMessage);
     }
 
     @isTest
@@ -198,6 +199,32 @@ private class BulkSelectBundleComponentTest {
         System.assertEquals(3, res[0].totalBundles, 'unscoped must see all instances');
         System.assertEquals('entire quote', res[0].scopeDescription);
     }
+
+    // ── SWAP tests ───────────────────────────────────────────────────────
+
+    @isTest
+    static void testSwapMissingArgsFails() {
+        BulkSelectBundleComponent.Request req = new BulkSelectBundleComponent.Request();
+        req.operation = 'SWAP';
+        req.quoteId = '0Q0000000000001AAA';
+        req.bundleProductId = '01t000000000001AAA';
+        req.productRelatedComponentId = '0dS000000000001AAA';
+        // missing childProductId (the option to remove)
+        List<BulkSelectBundleComponent.Result> res =
+            BulkSelectBundleComponent.execute(new List<BulkSelectBundleComponent.Request>{ req });
+        System.assertEquals(false, res[0].isSuccess);
+        System.assert(res[0].errorMessage.contains('SWAP requires'), res[0].errorMessage);
+    }
+
+    // NOTE on SWAP coverage: a full unit test of the present-child swap (delete old + add new
+    // in one session, ignoring the transient mid-swap "range 1-1" block) cannot be set up via
+    // DML in this org. It requires a nested child line item (ParentQuoteLineItemId is
+    // configurator-managed and not DML-writeable) and a configurable bundle product with a
+    // ProductRelatedComponent (the parent must be a configurable bundle type). Those are
+    // configurator-provisioned, not test-insertable. The SWAP execution path is therefore
+    // verified LIVE end-to-end on the real NY bundles (delete-then-add, transient block ignored,
+    // final state clean, then reverted), which is the authoritative test. The deterministic
+    // unit coverage here is the argument validation (testSwapMissingArgsFails).
 
     private class TestData {
         Id quoteId;

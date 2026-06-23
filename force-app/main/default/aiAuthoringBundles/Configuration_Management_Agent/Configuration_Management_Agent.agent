@@ -188,11 +188,11 @@ subagent ConfigurationManagement:
                     filter_from_agent: False
 
         BulkSelectBundleComponent:
-            description: "Apply the SAME component change to EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user says 'all' / 'every', or when there are multiple instances of the same bundle. Optionally limit the change to named groups/regions via groupNames (e.g. 'California, New York'); leave groupNames blank to apply to the whole quote. SELECT needs productRelatedComponentId; DESELECT needs childProductId. All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Cannot create new products or delete arbitrary records."
+            description: "Apply the SAME component change to EVERY instance of a bundle product on a quote in one deterministic pass. Use when the user says 'all' / 'every', or when there are multiple instances of the same bundle. Optionally limit the change to named groups/regions via groupNames (e.g. 'California, New York'); leave groupNames blank to apply to the whole quote. SELECT needs productRelatedComponentId. DESELECT needs childProductId. SWAP replaces one option with another (e.g. in a single-select group) and needs BOTH productRelatedComponentId (the new option to turn on) and childProductId (the Product2 Id of the option to remove). All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Cannot create new products or delete arbitrary records."
             target: "apex://BulkSelectBundleComponent"
             inputs:
                 operation: string
-                    description: "SELECT to turn a component on for every bundle instance, DESELECT to turn it off"
+                    description: "SELECT to turn a component on for every bundle instance, DESELECT to turn it off, SWAP to replace one option with another"
                     is_required: True
                 quoteId: string
                     description: "The Quote being configured"
@@ -201,10 +201,10 @@ subagent ConfigurationManagement:
                     description: "The Product2 ID of the bundle; every instance of this product on the quote is updated"
                     is_required: True
                 productRelatedComponentId: string
-                    description: "SELECT only: the option to turn on across all instances (from ListBundleComponentOptions)"
+                    description: "SELECT or SWAP: the productRelatedComponentId of the option to turn ON across all instances (from ListBundleComponentOptions)"
                     is_required: False
                 childProductId: string
-                    description: "DESELECT only: the Product2 ID of the component to turn off across all instances"
+                    description: "DESELECT: the Product2 ID of the component to turn off. SWAP: the Product2 ID of the option to remove (the one being replaced)."
                     is_required: False
                 groupNames: string
                     description: "Optional. Comma-separated group/region names to limit the change to, e.g. 'California, New York'. Matched groups include their subgroups automatically. Leave blank to apply to every instance on the quote."
@@ -520,19 +520,31 @@ subagent ConfigurationManagement:
                  the user BEFORE calling it (it is gated to require confirmation).
 
             | INTENT - BULK COMPONENT CHANGE ACROSS ALL INSTANCES OF A BUNDLE:
-              Use this when the user wants the SAME component turned on or off for ALL /
-              EVERY instance of one bundle product (e.g. "add Essentials Training to all
-              QuantumBit Complete Solution bundles"), or when the quote has more than one
-              instance of that bundle. This includes changes limited to specific
-              GROUPS/REGIONS (e.g. "add Essentials Training to the QuantumBit bundles in
-              California and New York"). Do NOT loop {!@actions.SelectBundleComponent}
-              yourself — the bulk action handles every instance deterministically in one pass.
+              Use this when the user wants the SAME component turned on or off, or one option
+              REPLACED with another, for ALL / EVERY instance of one bundle product (e.g. "add
+              Essentials Training to all QuantumBit Complete Solution bundles", or "replace
+              QuantumBit Database with QuantumBit Database (Token Based) on all the bundles"),
+              or when the quote has more than one instance of that bundle. This includes changes
+              limited to specific GROUPS/REGIONS (e.g. "add Essentials Training to the QuantumBit
+              bundles in California and New York"). Do NOT loop
+              {!@actions.SelectBundleComponent} yourself, and do NOT try to do a replace as a
+              separate deselect then select — the bulk action handles every instance, including
+              swaps, deterministically in one pass.
+              CHOOSE THE OPERATION:
+              - "add / turn on / include X" -> SELECT
+              - "remove / turn off / drop X" -> DESELECT
+              - "replace X with Y / swap X for Y / change from X to Y / switch to Y" -> SWAP.
+                SWAP is REQUIRED when the group allows only one selection (a single-select
+                group): doing a standalone deselect or select there fails the rule because the
+                group is momentarily empty or has two. SWAP removes the old and adds the new in
+                one session, so always use SWAP for "replace/switch" requests.
               1. Resolve the quote ID per QUOTE ID RESOLUTION above (default to
                  {!@variables.currentRecordId} when on a Quote — do not ask for it). Resolve
                  the bundle's Product2 ID with {!@actions.QueryRecords}. Then resolve
-                 the component: for SELECT, get its productRelatedComponentId from
-                 {!@actions.ListBundleComponentOptions}; for DESELECT, get the component's
-                 child Product2 ID.
+                 the component(s) from {!@actions.ListBundleComponentOptions}: for SELECT, the
+                 productRelatedComponentId of the option to turn on; for DESELECT, the option's
+                 child Product2 ID; for SWAP, BOTH the productRelatedComponentId of the NEW
+                 option (to turn on) AND the child Product2 ID of the OLD option (to remove).
               2. DETERMINE GROUP SCOPE:
                  - If the user named specific regions/groups (e.g. "in California and New
                    York", "for the Texas bundles", "in Austin and Dallas") OR phrased it as an
@@ -552,9 +564,11 @@ subagent ConfigurationManagement:
                  groupsJson to state how many bundles are involved.
               4. When the user confirms, call {!@actions.confirm_save}, then call
                  {!@actions.BulkSelectBundleComponent} exactly once with operation
-                 (SELECT or DESELECT), quoteId, bundleProductId, either
-                 productRelatedComponentId (SELECT) or childProductId (DESELECT), and
-                 groupNames (the canonical names from step 2, or omit/blank for the whole quote).
+                 (SELECT, DESELECT, or SWAP), quoteId, bundleProductId, groupNames (the
+                 canonical names from step 2, or omit/blank for the whole quote), and the option
+                 inputs: productRelatedComponentId for SELECT; childProductId for DESELECT; BOTH
+                 productRelatedComponentId (new option) AND childProductId (old option to remove)
+                 for SWAP.
               5. Report the outcome from the result, using scopeDescription so the rep knows
                  exactly what was affected:
                  - If isSuccess is true and saved is true: tell the user the change was
@@ -672,10 +686,12 @@ subagent ConfigurationManagement:
                 with bundleLineItemId = ...
 
             bulk_select_component: @actions.BulkSelectBundleComponent
-                description: "Apply one component SELECT/DESELECT to EVERY instance of a bundle on the quote in one pass, optionally limited to named groups/regions via groupNames"
+                description: "Apply one component SELECT, DESELECT, or SWAP to EVERY instance of a bundle on the quote in one pass, optionally limited to named groups/regions via groupNames. SWAP passes both productRelatedComponentId (new) and childProductId (old to remove)."
                 with operation = ...
                 with quoteId = ...
                 with bundleProductId = ...
+                with productRelatedComponentId = ...
+                with childProductId = ...
                 with groupNames = ...
                 available when @variables.userConfirmedSave == True
 

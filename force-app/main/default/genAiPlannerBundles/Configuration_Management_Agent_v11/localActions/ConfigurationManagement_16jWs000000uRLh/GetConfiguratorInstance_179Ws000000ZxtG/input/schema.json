@@ -1,0 +1,14 @@
+{
+  "required" : [ "contextId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "contextId" : {
+      "title" : "Context Id",
+      "description" : "Session handle from LoadConfiguratorSession",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

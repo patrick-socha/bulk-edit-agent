@@ -1,0 +1,49 @@
+{
+  "required" : [ "operation", "quoteId", "bundleProductId" ],
+  "unevaluatedProperties" : false,
+  "properties" : {
+    "bundleProductId" : {
+      "title" : "Bundle Product Id",
+      "description" : "The Product2 ID of the bundle; every instance of this product on the quote is updated",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "childProductId" : {
+      "title" : "Child Product Id",
+      "description" : "DESELECT: the Product2 ID of the component to turn off. SWAP: the Product2 ID of the option to remove (the one being replaced).",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "groupNames" : {
+      "title" : "Group Names",
+      "description" : "Optional. Comma-separated group/region names to limit the change to, e.g. 'California, New York'. Matched groups include their subgroups automatically. Leave blank to apply to every instance on the quote.",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "operation" : {
+      "title" : "Operation",
+      "description" : "SELECT to turn a component on for every bundle instance, DESELECT to turn it off, SWAP to replace one option with another",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "productRelatedComponentId" : {
+      "title" : "Product Related Component Id",
+      "description" : "SELECT or SWAP: the productRelatedComponentId of the option to turn ON across all instances (from ListBundleComponentOptions)",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    },
+    "quoteId" : {
+      "title" : "Quote Id",
+      "description" : "The Quote being configured",
+      "lightning:type" : "lightning__textType",
+      "lightning:isPII" : false,
+      "copilotAction:isUserInput" : false
+    }
+  },
+  "lightning:type" : "lightning__objectType"
+}

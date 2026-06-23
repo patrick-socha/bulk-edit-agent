@@ -1,11 +1,19 @@
 /**
- * Applies the SAME component change (SELECT or DESELECT) to EVERY instance of a bundle
+ * Applies the SAME component change (SELECT, DESELECT, or SWAP) to EVERY instance of a bundle
  * product on a quote, deterministically, in ONE configurator session with ONE save.
  *
  * Why this exists: a quote can have multiple instances of the same bundle. The LLM is
  * unreliable at looping "do X for each of N", so the loop lives here in Apex. And because
  * save-instance is a whole-quote replace, all instance mutations happen in a single session
  * and are committed by a single save (all-or-nothing).
+ *
+ * SWAP replaces one option with another within the SAME session: it stages the removal of the
+ * old option (delete-nodes) and the addition of the new one (add-nodes) before saving. This is
+ * required for single-select groups (min=1/max=1, e.g. a "Consumption" group): doing the
+ * deselect or the select alone leaves the group transiently out of range, which the configurator
+ * reports as a blocking message. By sending both moves in one session and judging ONLY the final
+ * batch's rule result, the group is never observed out of range at commit. (Verified via live
+ * read-only probe: delete-then-add on a min=1/max=1 group ends with no blocking message.)
  *
  * All-or-nothing: if ANY instance is blocked by a bundle rule or errors, NOTHING is saved.
  */
@@ -16,7 +24,7 @@ public with sharing class BulkSelectBundleComponent {
 
     @InvocableMethod(
         label='Bulk Select Bundle Component'
-        description='Apply the same component SELECT or DESELECT to every instance of a bundle product on a quote, in one pass. SELECT needs productRelatedComponentId; DESELECT needs childProductId. All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Never creates new products or deletes arbitrary records — only toggles predefined options.'
+        description='Apply the same component SELECT, DESELECT, or SWAP to every instance of a bundle product on a quote, in one pass. SELECT needs productRelatedComponentId. DESELECT needs childProductId. SWAP replaces one option with another in a single-select group and needs BOTH productRelatedComponentId (the new option) and childProductId (the Product2 Id of the option to remove). All-or-nothing: if any instance is blocked by bundle rules, nothing is saved. Reports per-bundle results. Never creates new products or deletes arbitrary records — only toggles predefined options.'
     )
     public static List<Result> execute(List<Request> requests) {
         List<Result> results = new List<Result>();
@@ -31,8 +39,8 @@ public with sharing class BulkSelectBundleComponent {
         List<Map<String, Object>> perBundle = new List<Map<String, Object>>();
         try {
             String op = req.operation != null ? req.operation.toUpperCase() : '';
-            if (op != 'SELECT' && op != 'DESELECT') {
-                return fail(r, 'operation must be SELECT or DESELECT.');
+            if (op != 'SELECT' && op != 'DESELECT' && op != 'SWAP') {
+                return fail(r, 'operation must be SELECT, DESELECT, or SWAP.');
             }
             if (String.isBlank(req.quoteId) || String.isBlank(req.bundleProductId)) {
                 return fail(r, 'quoteId and bundleProductId are required.');
@@ -42,6 +50,9 @@ public with sharing class BulkSelectBundleComponent {
             }
             if (op == 'DESELECT' && String.isBlank(req.childProductId)) {
                 return fail(r, 'childProductId is required for DESELECT.');
+            }
+            if (op == 'SWAP' && (String.isBlank(req.productRelatedComponentId) || String.isBlank(req.childProductId))) {
+                return fail(r, 'SWAP requires productRelatedComponentId (the new option) and childProductId (the option to remove).');
             }
 
             // 0) Resolve optional group/region scope BEFORE any callout, so an unknown
@@ -103,11 +114,14 @@ public with sharing class BulkSelectBundleComponent {
                 childItemByParent.get(child.ParentQuoteLineItemId).put(child.Product2Id, child.Id);
             }
 
-            // 3) For SELECT, resolve the PRC + its child product + price ONCE (shared by all).
-            ProductRelatedComponent prc;
+            // 3) Resolve what each op needs ONCE (shared across all instances):
+            //    - SELECT/SWAP need the new option's PRC + its child product + price.
+            //    - DESELECT/SWAP need the Product2 Id of the option being turned off.
+            ProductRelatedComponent prc;           // the option being turned ON (SELECT/SWAP)
             PricebookEntry pbe;
-            Id targetChildProductId;
-            if (op == 'SELECT') {
+            Id targetChildProductId;                // SELECT: product to add. DESELECT: product to remove.
+            Id removeChildProductId;                // SWAP only: the product to remove
+            if (op == 'SELECT' || op == 'SWAP') {
                 List<ProductRelatedComponent> prcs = [
                     SELECT Id, ChildProductId, ParentProductId
                     FROM ProductRelatedComponent
@@ -118,11 +132,15 @@ public with sharing class BulkSelectBundleComponent {
                     return fail(r, 'The specified component option does not exist.');
                 }
                 prc = prcs[0];
-                targetChildProductId = prc.ChildProductId;
+                targetChildProductId = prc.ChildProductId; // the product we are turning ON
                 Id pbId = [SELECT Pricebook2Id FROM Quote WHERE Id = :req.quoteId WITH USER_MODE].Pricebook2Id;
                 pbe = ConfiguratorClient.resolvePricebookEntry(prc.ChildProductId, pbId);
-            } else {
+            }
+            if (op == 'DESELECT') {
                 targetChildProductId = (Id) req.childProductId;
+            }
+            if (op == 'SWAP') {
+                removeChildProductId = (Id) req.childProductId;
             }
 
             // 4) One session for all instances.
@@ -131,79 +149,109 @@ public with sharing class BulkSelectBundleComponent {
                 return fail(r, 'Could not start a configurator session for the quote.');
             }
 
-            // 5) Stage each instance; track per-bundle status. Sequential mutation calls in
-            //    the SAME session (works regardless of multi-parent-per-call support).
-            // Build all mutation nodes (skipping idempotent instances), then send ONE
-            //    add-nodes (or one delete-nodes) call. Batching avoids N sequential slow
-            //    callouts that caused "Read timed out" — 3 round-trips total.
+            // 5) Stage each instance into up to TWO batches that run in the SAME session:
+            //    a delete-nodes batch (DESELECT, and the "remove old" half of a SWAP) and an
+            //    add-nodes batch (SELECT, and the "add new" half of a SWAP). For a SWAP the
+            //    group is momentarily out of range between the two calls (e.g. 0 then 1 in a
+            //    min=1/max=1 group), which the configurator reports as a transient blocking
+            //    message; that message is IGNORED and only the FINAL batch's result decides
+            //    the outcome. Batching also avoids N sequential slow callouts (Read timed out).
             Boolean anyBlockedOrFailed = false;
             Integer idx = 0;
-            List<Object> mutationNodes = new List<Object>();
+            List<Object> deleteNodes = new List<Object>();
+            List<Object> addNodes = new List<Object>();
             List<Map<String, Object>> stagedEntries = new List<Map<String, Object>>();
+            String okStatus = (op == 'SELECT') ? 'SELECTED' : (op == 'DESELECT') ? 'DESELECTED' : 'SWAPPED';
+
             for (Id bundleLineItemId : instanceIds) {
                 idx++;
                 Map<String, Object> entry = new Map<String, Object>{ 'bundleLineItemId' => bundleLineItemId };
-
-                Boolean alreadyHasChild = childrenByParent.get(bundleLineItemId).contains(targetChildProductId);
-
-                if (op == 'SELECT' && alreadyHasChild) {
-                    entry.put('status', 'SKIPPED_ALREADY');
-                    entry.put('detail', 'Component already selected on this bundle.');
-                    r.skippedCount++;
-                    perBundle.add(entry);
-                    continue;
-                }
-                if (op == 'DESELECT' && !alreadyHasChild) {
-                    entry.put('status', 'SKIPPED_ALREADY');
-                    entry.put('detail', 'Component is not selected on this bundle.');
-                    r.skippedCount++;
-                    perBundle.add(entry);
-                    continue;
-                }
+                Set<Id> existing = childrenByParent.get(bundleLineItemId);
+                String refSuffix = idx + '_' + String.valueOf(Math.abs(
+                    (op == 'DESELECT' ? req.childProductId : req.productRelatedComponentId).hashCode()));
 
                 if (op == 'SELECT') {
-                    // Two nodes (QLI + relationship) per instance; unique ref per instance.
-                    mutationNodes.addAll(ConfiguratorClient.buildSelectNodes(
-                        req.quoteId, bundleLineItemId, prc, pbe,
-                        idx + '_' + String.valueOf(Math.abs(req.productRelatedComponentId.hashCode()))));
-                } else {
-                    Id childItemId = childItemByParent.get(bundleLineItemId).get(targetChildProductId);
-                    mutationNodes.add(ConfiguratorClient.buildDeleteNode(req.quoteId, childItemId));
+                    if (existing.contains(targetChildProductId)) {
+                        skip(r, perBundle, entry, 'Component already selected on this bundle.');
+                        continue;
+                    }
+                    addNodes.addAll(ConfiguratorClient.buildSelectNodes(
+                        req.quoteId, bundleLineItemId, prc, pbe, refSuffix));
+
+                } else if (op == 'DESELECT') {
+                    if (!existing.contains(targetChildProductId)) {
+                        skip(r, perBundle, entry, 'Component is not selected on this bundle.');
+                        continue;
+                    }
+                    deleteNodes.add(ConfiguratorClient.buildDeleteNode(
+                        req.quoteId, childItemByParent.get(bundleLineItemId).get(targetChildProductId)));
+
+                } else { // SWAP: remove the old option and add the new one in the same session
+                    Boolean hasNew = existing.contains(targetChildProductId);
+                    Boolean hasOld = existing.contains(removeChildProductId);
+                    if (hasNew && !hasOld) {
+                        skip(r, perBundle, entry, 'Already set to the new option on this bundle.');
+                        continue;
+                    }
+                    if (!hasOld) {
+                        // The specific option to remove is not selected here; do not force a
+                        // standalone add (that would push a single-select group out of range).
+                        skip(r, perBundle, entry, 'The option to swap out is not selected on this bundle; skipped.');
+                        continue;
+                    }
+                    deleteNodes.add(ConfiguratorClient.buildDeleteNode(
+                        req.quoteId, childItemByParent.get(bundleLineItemId).get(removeChildProductId)));
+                    if (!hasNew) {
+                        addNodes.addAll(ConfiguratorClient.buildSelectNodes(
+                            req.quoteId, bundleLineItemId, prc, pbe, refSuffix));
+                    }
                 }
-                stagedEntries.add(entry); // status set after the batch call
+                stagedEntries.add(entry); // status set after the batch calls
             }
 
-            // Send the single batched mutation (only if there's something to change).
-            if (!mutationNodes.isEmpty()) {
-                String action = (op == 'SELECT') ? 'add-nodes' : 'delete-nodes';
-                String nodeKey = (op == 'SELECT') ? 'addedNodes' : 'deletedNodes';
-                HttpResponse resp = ConfiguratorClient.callConfigurator(action,
-                    new Map<String, Object>{ 'contextId' => ctx, nodeKey => mutationNodes });
-                Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(resp.getBody());
-                Boolean apiOk = parsed.get('success') == true;
-                String ruleMessage = ConfiguratorClient.extractBlockingMessage(parsed);
+            // Execute the staged batches in one session: delete first, then add. The LAST
+            // batch sent is the one whose rule-block result is authoritative; an earlier
+            // batch's transient block (mid-swap, group out of range) is ignored, but a hard
+            // API failure on any batch still aborts.
+            Boolean hasDelete = !deleteNodes.isEmpty();
+            Boolean hasAdd = !addNodes.isEmpty();
+            if (hasDelete || hasAdd) {
+                String batchError = null;   // hard failure detail
+                String batchBlock = null;   // rule-block detail from the FINAL batch
 
-                if (!apiOk || ruleMessage != null) {
-                    anyBlockedOrFailed = true;
-                    String status;
-                    String detail;
-                    if (ruleMessage != null) {
-                        status = 'RULE_BLOCKED';
-                        detail = ruleMessage;
-                        r.ruleBlockedCount += stagedEntries.size();
-                    } else {
-                        status = 'FAILED';
-                        Object errs = parsed.get('errors');
-                        detail = errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.';
-                        r.failedCount += stagedEntries.size();
+                if (hasDelete) {
+                    Map<String, Object> delParsed = sendBatch(ctx, 'delete-nodes', 'deletedNodes', deleteNodes);
+                    if (delParsed.get('success') != true) {
+                        Object errs = delParsed.get('errors');
+                        batchError = errs != null ? JSON.serialize(errs) : 'Configurator rejected the removal.';
+                    } else if (!hasAdd) {
+                        // delete is the final batch (DESELECT) -> its block is authoritative
+                        batchBlock = ConfiguratorClient.extractBlockingMessage(delParsed);
                     }
+                }
+                if (batchError == null && hasAdd) {
+                    Map<String, Object> addParsed = sendBatch(ctx, 'add-nodes', 'addedNodes', addNodes);
+                    if (addParsed.get('success') != true) {
+                        Object errs = addParsed.get('errors');
+                        batchError = errs != null ? JSON.serialize(errs) : 'Configurator rejected the change.';
+                    } else {
+                        // add is the final batch (SELECT/SWAP) -> its block is authoritative
+                        batchBlock = ConfiguratorClient.extractBlockingMessage(addParsed);
+                    }
+                }
+
+                if (batchError != null || batchBlock != null) {
+                    anyBlockedOrFailed = true;
+                    String status = (batchBlock != null) ? 'RULE_BLOCKED' : 'FAILED';
+                    String detail = (batchBlock != null) ? batchBlock : batchError;
+                    if (batchBlock != null) { r.ruleBlockedCount += stagedEntries.size(); }
+                    else { r.failedCount += stagedEntries.size(); }
                     for (Map<String, Object> e : stagedEntries) {
                         e.put('status', status);
                         e.put('detail', detail);
                         perBundle.add(e);
                     }
                 } else {
-                    String okStatus = (op == 'SELECT') ? 'SELECTED' : 'DESELECTED';
                     for (Map<String, Object> e : stagedEntries) {
                         e.put('status', okStatus);
                         perBundle.add(e);
@@ -241,7 +289,9 @@ public with sharing class BulkSelectBundleComponent {
             if (saveResp.getStatusCode() >= 200 && saveResp.getStatusCode() < 300 && saveParsed.get('success') == true) {
                 r.isSuccess = true;
                 r.saved = true;
-                String verb = op == 'SELECT' ? 'Added the component to' : 'Removed the component from';
+                String verb = op == 'SELECT' ? 'Added the component to'
+                    : op == 'DESELECT' ? 'Removed the component from'
+                    : 'Swapped the component on';
                 r.message = verb + ' ' + r.changedCount + ' of ' + r.totalBundles + ' bundle instances' +
                     (r.skippedCount > 0 ? ' (' + r.skippedCount + ' already in the requested state).' : '.');
             } else {
@@ -266,10 +316,26 @@ public with sharing class BulkSelectBundleComponent {
         return r;
     }
 
+    /** Record a per-instance skip (already in the desired state, or nothing to do here). */
+    private static void skip(Result r, List<Map<String, Object>> perBundle,
+            Map<String, Object> entry, String detail) {
+        entry.put('status', 'SKIPPED_ALREADY');
+        entry.put('detail', detail);
+        r.skippedCount++;
+        perBundle.add(entry);
+    }
+
+    /** Send one mutation batch in the session and return the parsed response. */
+    private static Map<String, Object> sendBatch(String ctx, String action, String nodeKey, List<Object> nodes) {
+        HttpResponse resp = ConfiguratorClient.callConfigurator(action,
+            new Map<String, Object>{ 'contextId' => ctx, nodeKey => nodes });
+        return (Map<String, Object>) JSON.deserializeUntyped(resp.getBody());
+    }
+
     public class Request {
         @InvocableVariable(
             label='Operation'
-            description='SELECT to turn a component on for every bundle instance, DESELECT to turn it off'
+            description='SELECT to turn a component on for every bundle instance, DESELECT to turn it off, SWAP to replace one option with another (e.g. in a single-select group)'
             required=true
         )
         public String operation;
@@ -290,14 +356,14 @@ public with sharing class BulkSelectBundleComponent {
 
         @InvocableVariable(
             label='Product Related Component ID'
-            description='SELECT only: the predefined component option to turn on across all instances (from ListBundleComponentOptions)'
+            description='SELECT or SWAP: the predefined component option to turn ON across all instances (from ListBundleComponentOptions)'
             required=false
         )
         public String productRelatedComponentId;
 
         @InvocableVariable(
             label='Child Product ID'
-            description='DESELECT only: the Product2 ID of the component to turn off across all instances'
+            description='DESELECT: the Product2 ID of the component to turn off. SWAP: the Product2 ID of the option to remove (replaced by productRelatedComponentId).'
             required=false
         )
         public String childProductId;
@@ -355,7 +421,7 @@ public with sharing class BulkSelectBundleComponent {
 
         @InvocableVariable(
             label='Results JSON'
-            description='Per-instance JSON: bundleLineItemId, status (SELECTED|DESELECTED|SKIPPED_ALREADY|RULE_BLOCKED|FAILED), detail'
+            description='Per-instance JSON: bundleLineItemId, status (SELECTED|DESELECTED|SWAPPED|SKIPPED_ALREADY|RULE_BLOCKED|FAILED), detail'
         )
         public String resultsJson;
 
