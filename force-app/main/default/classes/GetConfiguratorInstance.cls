@@ -1,6 +1,6 @@
 public with sharing class GetConfiguratorInstance {
 
-    private static final String ENDPOINT_PATH = '/connect/cpq/configurator/actions/get-instance';
+    private static final String ACTION = 'get-instance';
 
     @InvocableMethod(
         label='Get Configurator Instance'
@@ -21,14 +21,9 @@ public with sharing class GetConfiguratorInstance {
             Map<String, Object> body = new Map<String, Object>();
             body.put('contextId', req.contextId);
 
-            HttpRequest httpReq = new HttpRequest();
-            httpReq.setEndpoint('callout:Configurator_API/services/data/v67.0' + ENDPOINT_PATH);
-            httpReq.setHeader('Content-Type', 'application/json');
-            httpReq.setMethod('POST');
-            httpReq.setBody(JSON.serialize(body));
-
-            Http http = new Http();
-            HttpResponse resp = http.send(httpReq);
+            // Route through the shared client for the full 120s timeout (see
+            // ConfiguratorClient.callConfigurator); the default 10s timed out on slow calls.
+            HttpResponse resp = ConfiguratorClient.callConfigurator(ACTION, body);
 
             r.responseBody = resp.getBody();
             if (resp.getStatusCode() >= 200 && resp.getStatusCode() < 300) {

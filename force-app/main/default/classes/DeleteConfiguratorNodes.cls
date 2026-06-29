@@ -1,6 +1,6 @@
 public with sharing class DeleteConfiguratorNodes {
 
-    private static final String ENDPOINT_PATH = '/connect/cpq/configurator/actions/delete-nodes';
+    private static final String ACTION = 'delete-nodes';
 
     @InvocableMethod(
         label='Delete Configurator Nodes'
@@ -25,14 +25,9 @@ public with sharing class DeleteConfiguratorNodes {
                 body.put('configuratorOptions', JSON.deserializeUntyped(req.configuratorOptionsJson));
             }
 
-            HttpRequest httpReq = new HttpRequest();
-            httpReq.setEndpoint('callout:Configurator_API/services/data/v67.0' + ENDPOINT_PATH);
-            httpReq.setHeader('Content-Type', 'application/json');
-            httpReq.setMethod('POST');
-            httpReq.setBody(JSON.serialize(body));
-
-            Http http = new Http();
-            HttpResponse resp = http.send(httpReq);
+            // Route through the shared client for the full 120s timeout (see
+            // ConfiguratorClient.callConfigurator); the default 10s timed out on slow calls.
+            HttpResponse resp = ConfiguratorClient.callConfigurator(ACTION, body);
 
             r.responseBody = resp.getBody();
             if (resp.getStatusCode() >= 200 && resp.getStatusCode() < 300) {

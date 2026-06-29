@@ -1,6 +1,6 @@
 public with sharing class LoadConfiguratorSession {
 
-    private static final String ENDPOINT_PATH = '/connect/cpq/configurator/actions/load-instance';
+    private static final String ACTION = 'load-instance';
 
     @InvocableMethod(
         label='Load Configurator Session'
@@ -25,14 +25,10 @@ public with sharing class LoadConfiguratorSession {
                 body.put('configuratorOptions', JSON.deserializeUntyped(req.configuratorOptionsJson));
             }
 
-            HttpRequest httpReq = new HttpRequest();
-            httpReq.setEndpoint('callout:Configurator_API/services/data/v67.0' + ENDPOINT_PATH);
-            httpReq.setHeader('Content-Type', 'application/json');
-            httpReq.setMethod('POST');
-            httpReq.setBody(JSON.serialize(body));
-
-            Http http = new Http();
-            HttpResponse resp = http.send(httpReq);
+            // Route through the shared client so this callout gets the full 120s timeout
+            // (the configurator API is slow per call; the default 10s timed out and forced
+            // the agent to retry, doubling the turn). See ConfiguratorClient.callConfigurator.
+            HttpResponse resp = ConfiguratorClient.callConfigurator(ACTION, body);
 
             r.responseBody = resp.getBody();
             if (resp.getStatusCode() >= 200 && resp.getStatusCode() < 300) {
